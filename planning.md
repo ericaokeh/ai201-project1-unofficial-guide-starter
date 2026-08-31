@@ -24,7 +24,7 @@ This is hard to find through official channels because kennel club and vet clini
 
 | # | Source | Description | URL or location |
 |---|--------|-------------|-----------------|
-| 1 |Italian Greyhound Rescue Foundation | Itlian Greyhound Diets | https://www.igrescue.com/html/basics/diet_for_italian_greyhounds.shtml|
+| 1 |Italian Greyhound Rescue Foundation | Italian Greyhound diets | https://www.igrescue.com/html/basics/diet_for_italian_greyhounds.shtml|
 | 2 | midatlanticiggyrescue| Housetraining| https://www.midatlanticiggyrescue.com/ig-helptraining/housetraining/|
 | 3 | southern cross vet| Health issues| https://southerncrossvet.com.au/10-italian-greyhound-common-health-issues/|
 | 4 |Houndtees | cold dogs| https://houndtees.com.au/en-us/blogs/blog/how-to-tell-if-your-sighthound-is-cold-how-to-keep-them-warm?srsltid=AfmBOoqwnl7UugoN1sZGtjNt382BoG-E0VJKtf1_Xj7G84TRIQFnSCzj|
@@ -32,7 +32,7 @@ This is hard to find through official channels because kennel club and vet clini
 | 6 |ig rescue | Color | https://www.igrescue.com/html/basics/coloration_&_patterns.shtml|
 | 7 | ig rescue| health| https://www.igrescue.com/html/basics/caring_for_iggys.shtml|
 | 8 |italiangreyhoundrescuecharity | Exercise| https://italiangreyhoundrescuecharity.org.uk/about-italian-greyhounds/exercise/|
-| 9 | iggy rescue| compatability|https://www.iggyrescue.com/html/basics/other_pets_&_italian_greyhounds.shtml |
+| 9 | iggy rescue| compatibility with other pets|https://www.iggyrescue.com/html/basics/other_pets_&_italian_greyhounds.shtml |
 | 10 | adopt a pet | barking | https://www.adoptapet.com/answers/do-italian-greyhounds-bark-a-lot|
 
 ---
@@ -88,9 +88,24 @@ I'm also going to put the source name at the front of each chunk, like `Italian 
 
 **Embedding model:**
 
+`all-MiniLM-L6-v2`, through the sentence-transformers library. I picked it because it's already in requirements.txt, it runs on my laptop for free with no API key, and it's fast. It handles 256 word-pieces at a time, which is a little under my 1,000-character chunks, so a long chunk may get slightly cut off at the end — something to keep an eye on.
+
+I'm storing the vectors in Chroma.
+
 **Top-k:**
 
+5. My chunks are about one section each, and a lot of my questions touch more than one source — "is this dog right for me" pulls from exercise, barking, and health pages at once. Pulling 5 gives the model enough to work with. If I only pulled 2, I'd probably miss things; if I pulled 10, I'd start feeding it chunks that aren't really related to the question.
+
 **Production tradeoff reflection:**
+
+If this were a real product and money wasn't an issue, here's what I'd think about:
+
+- **Context length.** MiniLM only looks at about 256 word-pieces, so it can miss the tail end of a longer chunk. A model like OpenAI's `text-embedding-3-large` or Voyage's models can take much longer text, which would let me use bigger chunks without losing anything.
+- **Accuracy on my topic.** My documents are full of specific terms like "Progressive Retinal Atrophy" and "belly bands." A bigger model would do a better job of understanding those than a small general-purpose one.
+- **Speed and where it runs.** MiniLM runs locally and answers instantly. An API model is more accurate but adds a network round-trip to every single search, and my whole document collection would get sent to another company.
+- **Other languages.** All of my sources are in English, so I don't need this now. But if I wanted people to be able to ask questions in Spanish, I'd need a multilingual model.
+
+For a class project MiniLM is the right call. For real users I'd probably pay for a hosted model and keep MiniLM as a backup.
 
 ---
 
@@ -106,7 +121,7 @@ I'm also going to put the source name at the front of each chunk, like `Italian 
 | 1 | Do Italian Greyhounds bark a lot? | No — they are generally quiet and not as vocal as many breeds, though they may bark when excited, nervous, or seeking attention. (Adopt-a-Pet) |
 | 2 | What are the early signs of Progressive Retinal Atrophy in an Italian Greyhound? | Night blindness and dilated pupils. It's a genetic disease causing gradual permanent blindness, isn't thought to be painful, and has no known treatment. (Southern Cross Vet) |
 | 3 | Why is it bad for an Italian Greyhound to be overweight? | IGs aren't built to carry extra weight — it increases the workload on vital organs, shortens life expectancy, and raises the risk of leg breaks and other orthopedic problems by straining muscles, bones, and joints. (IG Rescue Foundation) |
-| 4 | Is crating an Italian Greyhound cruel? | No — crates are described as a positive and important housetraining tool, since dogs are den animals and benefit from having their own space. (Mid-Atlantic Iggy Rescue) |
+| 4 | What reason do rescue groups give for saying a crate is not cruel for an Italian Greyhound? | Because dogs are den animals and should have their own "room." Crates are described as a positive and important tool for housetraining. (Mid-Atlantic Iggy Rescue) |
 | 5 | How tall and heavy is a typical Italian Greyhound? | Withers height about 13–15 in (33–38 cm), weight about 7–14 lb (3–6 kg), lifespan 12–15 years. (dimensions.com) |
 
 ---
@@ -117,9 +132,13 @@ I'm also going to put the source name at the front of each chunk, like `Italian 
      Consider: noisy or inconsistent documents, missing source attribution, off-topic
      retrieval, chunks that split key information across boundaries. -->
 
-1.
+1. **Menu and footer text getting mixed in with the real content.** The vet page has more words in its menus, footer, and clinic addresses than in the actual article. If I don't strip that out, I'll end up with chunks that are just lists of links, and they could show up as answers. A question like "what should I feed my dog" might match a footer link that says "Nutrition Consults" and the system would give a useless answer that still looks like it came from a real source.
 
-2.
+2. **Answers getting split across two chunks.** Even with overlap, a section that runs long will get cut somewhere. The health page is the biggest risk — if the name of a disease lands in one chunk and its symptoms land in the next, then searching for the symptom finds a chunk that doesn't say what the disease is called. My fix for this is putting the source and section name at the top of every chunk so there's always some context attached.
+
+3. **My sources don't always agree.** Different rescue groups say different things about how much exercise these dogs need or what to feed them. When two chunks disagree, the model might blend them into one confident-sounding answer that neither source actually said. I want it to say when sources differ instead of picking one.
+
+4. **Questions my documents can't answer.** Someone will ask about price, breeders, or a different breed entirely. My pages don't cover that, but the search will still return the 5 closest chunks no matter what — there's no "nothing found" result. So the model has to be told to refuse when the chunks it got don't actually answer the question.
 
 ---
 
@@ -130,6 +149,62 @@ I'm also going to put the source name at the front of each chunk, like `Italian 
      Label each stage with the tool or library you're using.
      You can use ASCII art, a Mermaid diagram, or embed a sketch as an image.
      You'll use this diagram as context when prompting AI tools to implement each stage. -->
+
+```
+   10 saved web pages
+   (documents/ folder)
+           |
+           v
++---------------------------+
+| 1. INGESTION              |   Read each .txt/.html file.
+|    Python, built-in open()|   Strip out menus, footers, and
+|                           |   ads so only article text is left.
++---------------------------+
+           |
+           v
++---------------------------+
+| 2. CHUNKING               |   Recursive split: paragraphs first,
+|    my own chunk_text()    |   then sentences.
+|                           |   1,000 chars, 150 overlap.
+|                           |   Add source name to each chunk.
++---------------------------+
+           |
+           v  ~70-100 chunks
++---------------------------+
+| 3. EMBEDDING + STORAGE    |   Turn each chunk into a vector.
+|    sentence-transformers  |   Save vector + text + source name
+|    all-MiniLM-L6-v2       |   into a Chroma collection.
+|    -> Chroma              |
++---------------------------+
+           |
+           v
+     [ vector store ]
+           ^
+           |  top 5 closest chunks
++---------------------------+
+| 4. RETRIEVAL              |   Embed the user's question with the
+|    Chroma similarity      |   same model, find the 5 nearest chunks.
+|    search, k=5            |
++---------------------------+
+           |
+           v
++---------------------------+
+| 5. GENERATION             |   Send the 5 chunks + the question
+|    Groq API (Llama)       |   to the model with a system prompt
+|                           |   telling it to only use those chunks
+|                           |   and to list its sources.
++---------------------------+
+           |
+           v
++---------------------------+
+| 6. INTERFACE              |   Text box for the question,
+|    Gradio (or CLI)        |   answer + source list underneath.
++---------------------------+
+
+           ^
+           |
+   user types a question
+```
 
 ---
 
@@ -147,6 +222,23 @@ I'm also going to put the source name at the front of each chunk, like `Italian 
 
 **Milestone 3 — Ingestion and chunking:**
 
+- *Tool:* Claude Code.
+- *What I'll give it:* my Chunking Strategy section from this file, plus a note that my saved pages still have menus and footers in them.
+- *What I expect back:* two functions — one that loads every file in `documents/` and pulls out just the article text, and one `chunk_text()` that splits recursively at paragraphs, then sentences, at 1,000 characters with 150 overlap, and puts the source name at the front of each chunk.
+- *How I'll check it:* print the total chunk count and see if it's near my estimate of 70–100. Then print 5 random chunks and read them. I'm looking for chunks that stop mid-sentence, chunks that are just menu links, and whether the two short sources stayed in one piece.
+
 **Milestone 4 — Embedding and retrieval:**
 
+- *Tool:* Claude Code.
+- *What I'll give it:* my Retrieval Approach section and the output format of my chunking function.
+- *What I expect back:* code that embeds every chunk with `all-MiniLM-L6-v2`, saves them to Chroma along with the source name, and a `search()` function that takes a question and returns the top 5 chunks.
+- *How I'll check it:* run my 5 test questions through `search()` and read the chunks that come back before any model touches them. If question 2 doesn't return the PRA chunk, retrieval is broken and there's no point moving on. I'll also try an off-topic question like "how much does a Labrador cost" to see what junk comes back, since that tells me what the generation step will have to refuse.
+
 **Milestone 5 — Generation and interface:**
+
+- *Tool:* Claude Code.
+- *What I'll give it:* my `search()` function and my Anticipated Challenges section, especially the parts about sources disagreeing and questions my documents can't answer.
+- *What I expect back:* a function that sends the 5 chunks plus the question to Groq with a system prompt saying to only use the provided chunks, to say "I don't know" if they don't cover it, to point out when sources disagree, and to list which sources it used. Plus a small Gradio page with a question box and an answer area.
+- *How I'll check it:* run all 5 test questions and compare to my expected answers. Then ask something off-topic and confirm it refuses instead of guessing. Then ask something that's only *half* in my documents to see if it makes up the other half. I'll write down whatever fails for the Failure Case section of the README.
+
+**Where I expect to push back on the AI:** it tends to default to a plain fixed-size split and to skip the boilerplate stripping. It also writes very polite system prompts that don't actually refuse anything. Those are the two places I'll have to be specific.
