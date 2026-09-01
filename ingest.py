@@ -293,8 +293,34 @@ def is_heading(piece):
 
 
 def split_into_sentences(paragraph):
-    """Break a paragraph after . ! or ? followed by a space."""
-    parts = re.split(r"(?<=[.!?])\s+", paragraph)
+    """Break a paragraph after . ! or ? followed by a space.
+
+    Not every full stop ends a sentence. The vet page lists the causes of
+    seizures as "a. Stress b. Allergic reactions c. Low blood sugar d.
+    Cancer", and splitting on every full stop turned that into fragments
+    like "Low blood sugar d." -- a chunk that says nothing and could still
+    be retrieved for a question about seizures.
+
+    So I don't split after:
+      - a single letter ("a." "d."), which is a list marker
+      - a common title ("Dr." "Mr." "St.")
+      - a number ("4." in a numbered list)
+    """
+    # Each lookbehind has to reach back past the full stop itself, so they
+    # all include the "\." -- my first attempt checked the character
+    # immediately before the split point, which is always the full stop, so
+    # none of the rules did anything.
+    #
+    # \b before a single letter is what makes "d." (a list marker) different
+    # from "and." (the end of a sentence).
+    pattern = (
+        r"(?<!\b[A-Za-z]\.)"                  # a. b. c. d.
+        r"(?<!\b\d\.)(?<!\b\d\d\.)"           # 4. 10.
+        r"(?<!\bDr\.)(?<!\bMr\.)(?<!\bMs\.)"  # titles
+        r"(?<!\bSt\.)(?<!\bvs\.)(?<!\betc\.)"
+        r"(?<=[.!?])\s+"
+    )
+    parts = re.split(pattern, paragraph)
     return [p.strip() for p in parts if p.strip()]
 
 
@@ -403,6 +429,13 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
             and len(chunks[-2]) + len(chunks[-1]) + 2 <= chunk_size):
         chunks[-2] = chunks[-2] + "\n\n" + chunks[-1]
         chunks.pop()
+
+    # Drop anything under 4 words. A chunk that short can't answer a
+    # question -- the one this removes is "St Peters.", the vet clinic's
+    # location, left over at the end of that document. I checked where to
+    # put the line: 4 words removes only that, while 5 would also remove
+    # "Use your discretion here.", which at least reads like advice.
+    chunks = [c for c in chunks if len(c.split()) >= 4]
 
     # Attach the source name to each chunk and drop any empties.
     # "text" has the source name on the front, which is what I show to a
