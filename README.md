@@ -63,137 +63,113 @@ At 500 characters a health issue would split in half, putting the disease name i
 - Dropped runs of 3 or more short unpunctuated lines, which is how navigation menus appear; a single short line is kept because that's a real heading
 - Dropped lines repeated across 3 or more documents, which removed the site banner shared by four pages on the same rescue site
 - Dropped sentence fragments (lines starting with a lowercase letter or punctuation) and exact duplicate lines
+- Kept each surviving block as its own paragraph, separated by a blank line, so the chunker can find paragraph boundaries
 
-**Final chunk count:** **58 chunks** across 10 documents, from 49,084 characters of cleaned text. Sizes run 179 to 998 characters, averaging 846. That's inside the expected 50–2,000 range, and close to the 70–100 I estimated in planning.md — a bit lower because cleaning removed more boilerplate than I expected.
+**Final chunk count:** **64 chunks** across 10 documents, from 49,433 characters of cleaned text. Sizes run 153 to 998 characters, averaging 772. That's inside the expected 50–2,000 range, and just under the 70–100 I estimated in planning.md — a bit lower because cleaning removed more boilerplate than I expected.
+
+The per-document breakdown shows the chunker following the documents rather than cutting mechanically: the housetraining page (7,946 characters) produced 12 chunks and the vet page (7,245) produced 12, while the two very short sources produced 1 each. The 64 chunks have 62 distinct lengths, so nothing is being sliced at a fixed size.
 
 ---
 
 ## Sample Chunks
 
-<!-- Paste 5 representative chunks from your document collection after running your ingestion pipeline.
-     For each chunk, note which source document it came from.
-     These must be actual text — not screenshots. -->
+These are five **random** chunks printed by `python ingest.py`, copied exactly as they came out. Each one starts with its source name, because my chunker puts that at the front of every chunk.
 
-These are real chunks printed by `python ingest.py`, copied exactly as they came out.
-Each one starts with its source name, which my chunker puts at the front of every chunk.
+I picked them randomly on purpose. My first version of the sampling took evenly spaced chunks, and it kept handing me the same good-looking ones. The first random draw turned up three bad chunks straight away.
 
-**Chunk 1** — from `adopt_a_pet__do_italian_greyhounds_bark_a_lot.txt` (394 characters)
+**Chunk 1** — from `ig_rescue_foundation__caring_for_iggys.txt` (683 characters)
 
-> Adopt-a-Pet - Do Italian Greyhounds Bark a Lot?: Do Italian Greyhounds bark a lot? - Adopt a Pet
+> IG Rescue Foundation - Caring for Iggys: stinky things found in their yard, it may be a good idea to give them a quick cleansing before they are ready to snuggle under the blankets at night.
 >
-> No, Italian Greyhounds are generally not excessive barkers. They tend to be relatively quiet and are not as vocal as some other breeds. However, like all dogs, Italian Greyhounds might bark in response to certain stimuli or situations, such as when they are excited, nervous, or seeking attention.
+> Cleaning the Ears
+>
+> At a minimum keep monitor if your Italian Greyhound's ears are building up wax and dirt that may be irritating them, and causing them to itch or get infected. Heavy or dark buildup can be indicative of other problems such as an infection or ear mites even. Cleaning the ears isn't difficult but should be done with care. You should only clean the widest part of the ear, without entering the ear canal. If wax buildup is especially heavy, a veterinary visit may be needed.
 
-*Stands on its own:* yes. This whole source page is one short Q&A, so it became a single chunk. It's well under 1,000 characters and I let it stay that way instead of padding it out with something unrelated.
-
----
-
-**Chunk 2** — from `ig_rescue_foundation__caring_for_iggys.txt` (980 characters)
-
-> IG Rescue Foundation - Caring for Iggys: Caring for Italian Greyhounds
->
-> Compared to many dog breeds, Italian Greyhounds are a relatively low maintenance breed of dog.
->
-> They don't usually have the "dog smell" of other breeds, nor do they shed a lot.
->
-> Since Italian Greyhounds are a short-haired breed, grooming in a traditional sense, by brushing their hair on a regular basis, isn't needed.
->
-> However, like any dog they do need bathing, their nails need kept short, and glands sometimes expressed, squeezed, or drained.
->
-> Brushing an Iggy's Teeth
->
-> Keeping an Italian Greyhound's teeth clean is essential to maintaining good health.
->
-> Many owners will brush their dog's teeth daily to keep plaque build-up to a minimum.
->
-> Most pet retailers sell doggie tooth brushes and paste for cleaning a dog's teeth for a very reasonable cost.
->
-> A dog who does not have dental care at home will need more regular dental cleanings by a veterinarian, generally costing a few hundred dollars every year.
-
-*Stands on its own:* yes. You could answer "do Italian Greyhounds shed?" or "how often should I brush my IG's teeth?" from this chunk alone. It covers two related grooming topics rather than one, which is the cost of filling a chunk up to 1,000 characters.
+*Stands on its own:* yes. Someone could answer "how do I clean my Italian Greyhound's ears?" from this chunk alone. It opens mid-sentence because that's the 150-character overlap carrying the tail of the previous chunk, so the sentence isn't lost from either one.
 
 ---
 
-**Chunk 3** — from `ig_rescue_foundation__diet.txt` (786 characters)
+**Chunk 2** — from `houndtees__keeping_your_sighthound_warm.txt` (930 characters)
 
-> IG Rescue Foundation - Diet: Feeding and Weight Maintenance
+> Houndtees - Keeping Your Sighthound Warm: Please do what you can to warm them up, so they're happy to stretch back out or roach the day away – suggestions on that to come.
 >
-> The food you feed your Italian Greyhound is one of the primary ways that you can actively influence their health and lifespan.
+> Their ears are cold
 >
-> There are a number of viewpoints on what the "best" dog food is, but in truth, what is important is which food best meets your IG's
+> If your hound's ears are cold to the touch, they'll be feeling cold all over!
 >
-> Raw, Home-cooked, and Fresh Diets
+> Their paw pads are cold
 >
-> Some owners have reported improved health in their IG upon switching them to a raw diet.
+> Doggos regulate heat through their paw pads, and if your hound's feetsies are cold, they need some warming up.
 >
-> In theory, a raw diet comprised mainly of meat, bone, and organs is the best, most appropriate food for dogs because it is the freshest and least processed.
+> Are you cold?
 >
-> In contrast, kibble or canned food is highly processed, contains some degree of non-nutritive filler, and when cooked compromises nutritional integrity and is more difficult to digest.
+> If you're cold, your doggo won't be too far behind. Sighthound's bods do run at a higher base temp than hoomans, so they should typically feel warm to your touch. If you're cold, check your doggo's ears.
+>
+> Shivering
+>
+> Like hoomans, doggos will shiver to warm up. Not to be confused with chattering – sometimes, when greyhounds are excited, they'll chatter their teeth together, kinda like the dog equivalent of purring.
+>
+> Shaking it off
+>
+> Some greyhounds will attempt to shake off the cold like it were water.
 
-*Stands on its own:* mostly. It answers "is raw food better than kibble for an IG?" But one sentence is cut off on the source page itself — "which food best meets your IG's" just stops. That's how the original page reads, not a chunking bug, but it's a small piece of broken text sitting in my collection.
-
----
-
-**Chunk 4** — from `iggy_rescue__other_pets_and_italian_greyhounds.txt` (974 characters)
-
-> Iggy Rescue - Other Pets and Italian Greyhounds: People with cats know their cat's personality or personalities, if they have been accepting of other animals in the past, and how they may react.
->
-> We do get some Italian Greyhounds in to rescue who have had bad experiences with cats in the past and are scared of them due to being attacked or scratched.
->
-> And, on the opposite end of the spectrum, we also get IGs who are obsessed with chasing cats.
->
-> However, there are harmonious placements too where the cats and dogs learn to become great friends.
->
-> By visiting the Italian Greyhound message boards or forums, you will likely read stories or see pictures of Italian Greyhounds and cats living peacefully, or even cuddling together for a nap.
->
-> (Since Italian Greyhounds have a nice warm body, the cats sometimes learn to appreciate their IG buddies as a heating pad.)
->
-> IGs and Birds
->
-> Italian Greyhounds ARE sighthounds!
->
-> By nature they chase things including birds and rodents.
-
-*Stands on its own:* yes. It fully answers "do Italian Greyhounds get along with cats?" The last two lines start the next section about birds, which is what the 150-character overlap is for — the bird section continues at the start of the following chunk, so neither topic gets cut off.
+*Stands on its own:* yes. This fully answers "how can I tell if my sighthound is cold?" — it's a list of five signs, each with its heading attached to its explanation. This is the chunk I'd most want retrieved for that question, and it holds the whole answer.
 
 ---
 
-**Chunk 5** — from `mid_atlantic_iggy_rescue__housetraining.txt` (961 characters)
+**Chunk 3** — from `iggy_rescue__other_pets_and_italian_greyhounds.txt` (722 characters)
 
-> Mid-Atlantic Iggy Rescue - Housetraining: Teach the dog the command "Kennel" before he enters his crate.
+> Iggy Rescue - Other Pets and Italian Greyhounds: there will be exceptions, so it is always best to fill our an adoption application completely and accurately to help ensure a successful placement.
 >
-> If the dog is resistant to a crate initially, continue to give ALL meals and treats in the crate.
+> Iggys and Cats
 >
-> Then place the dog in the crate but do not leave the room.
->
-> Allow the dog to remain in the crate for just minutes, gradually increasing the time and eventually leaving the room and then the house for short intervals.
->
-> The goal is to condition the animal to see the crate as positive and short term and to assure him that you are returning.
->
-> Never let a dog out of the crate until he is quiet.
->
-> Otherwise he will quickly learn he can get out of his crate by exhibiting negative behavior.
->
-> When you let the dog out of the crate, do not make a big deal out of his exit.
->
-> This just confirms to him that "whew! glad you are out of that awful place".
->
-> Also, ignore a dog that is having problems with crate training 20-30 minutes before placing him in the crate.
+> More often than not, the cats are usually more particular about a dog coming in to their house than vice versa. People with cats know their cat's personality or personalities, if they have been accepting of other animals in the past, and how they may react. We do get some Italian Greyhounds in to rescue who have had bad experiences with cats in the past and are scared of them due to being attacked or scratched. And, on the opposite end of the spectrum, we also get IGs who are obsessed with chasing cats.
 
-*Stands on its own:* yes. This is a complete set of crate-training instructions and answers "how do I get my IG used to a crate?" without needing the rest of the page.
+*Stands on its own:* yes. It answers "do Italian Greyhounds get along with cats?" The "Iggys and Cats" heading sits directly above the text it introduces, which is what tells you what the chunk is about.
 
 ---
 
-### What I fixed after reading these
+**Chunk 4** — from `iggy_rescue__other_pets_and_italian_greyhounds.txt` (875 characters)
 
-The first time I printed these five chunks, three of them had problems, and I had to go back and change my cleaning code:
+> Iggy Rescue - Other Pets and Italian Greyhounds: Rescues get many questions about if Italian Greyhounds "get along" with other dogs, tolerate cats or birds, or are safe around other animals even. And, the answer to most of those questions is the same and simple... it really depends on the particular dog. The best way to know if a particular dogs gets along with other animals is to ask the rescue representative who is fostering the animal. They may or may not be able to tell you an answer based on if they have other pets in the house, or if the previous owners have supplied such information upon surrendering the IG. Although our approval process sometimes seems lengthy, we include a home visit so we can help introduce a dog in to a new environment, existing pets, and to feel comfortable that the dogs we love are going to a home where we also feel they will thrive.
 
-1. **Two chunks opened with the same site banner.** Four of my sources are pages on the same rescue website, so every one of them started with "Wren is a fighter…" and an all-caps scam warning. Those are real sentences on the right topic, so none of my line-by-line rules caught them. I fixed it by comparing documents to each other — any line appearing in 3 or more of my 10 documents is site furniture, and it gets dropped. That removed 9 lines and about 4,000 characters.
+*Stands on its own:* yes. It's one complete argument — that compatibility depends on the individual dog, and how to find out about a specific one. Note this is a second chunk from the same document as Chunk 3, covering a different part of it, which is what I want.
 
-2. **One chunk started in the middle of a sentence** — "a very positive, important tool in housetraining" with the words "Crating is" stranded above it. My overlap was cutting at the nearest space. I changed it to start the overlap at a sentence boundary instead, and fall back to a space only if there isn't one.
+---
 
-3. **The Adopt-a-Pet chunk was full of interface text** — "Loading…", "Enter e-mail", "Send", plus three "Related Questions" that the page links to but never answers. I added a list of whole lines that are always buttons, and a rule that treats a short question on its own line as a link rather than as writing. That chunk went from 596 characters to 394, and now it's just the question and the answer.
+**Chunk 5** — from `ig_rescue_foundation__diet.txt` (915 characters)
 
-**Still not perfect:** three of my 58 chunks are short leftovers from the very end of a document — a vet's author bio, a rescue group's tagline. They're on-topic enough not to be harmful, but they don't answer anything. I'd rather leave them in than write a rule aggressive enough to remove them, because that rule would probably eat real content too.
+> IG Rescue Foundation - Diet: Avoid "flavors", digests, and color dyes.
+>
+> Grain-free kibble or canned food
+>
+> Some Italian Greyhounds are sensitive to grains (corn, wheat, rice, oats, barley, rye, soybeans, millet, etc.), and enjoy better health when fed a grain-free food. It is important to remember that any grain-free kibble will have an alternative carbohydrate source such as sweet potato, peas, or potato, and some dogs also have difficulty with these alternative carbohydrates. A grain-free diet is especially worth considering if your dog has an existing health condition such as allergies, skin issues, chronic ear infections, immune issues, and digestive issues.
+>
+> IGs are not built to carry excess weight. Excess weight creates an increased workload for vital organs, reduces life expectancy, and increases the risk of leg break and other orthopedic issues through added strain on muscles, bones, and joints.
+
+*Stands on its own:* yes. It answers "should I feed my Italian Greyhound grain-free food?" It holds two topics — grain-free diets and weight — which is the cost of filling a chunk up to 1,000 characters, but both are about feeding so the chunk still has a clear subject.
+
+---
+
+### What I had to debug before these were usable
+
+Random sampling found problems that my evenly spaced sampling had hidden. Three rounds of fixes:
+
+**Round 1 — repeated site banners.** Two chunks opened with the same text: "Wren is a fighter…" and an all-caps scam warning. Four of my sources are pages on the same rescue website, so every one of them carried that banner. They're real sentences about Italian Greyhounds, so no line-by-line rule could catch them. The fix was to compare documents against each other — any line appearing in 3 or more of my 10 documents is site furniture. That removed 9 lines.
+
+**Round 2 — interface text and dead links.** The Adopt-a-Pet chunk contained "Loading…", "Enter e-mail", "Send", and three "Related Questions" the page links to but never answers. I added a list of whole lines that are always buttons, and a rule treating a short standalone question as a link rather than as writing.
+
+**Round 3 — the real bug.** A chunk started with the single word "Do". Chasing it down, I found my cleaning function joined lines with a single newline while my chunker splits paragraphs on blank lines. So every document arrived at the chunker as **one enormous paragraph**, and the paragraph step never ran — it fell through to sentence splitting every single time. My planning.md says "paragraphs first, then sentences," and that had not been true of my code at all.
+
+Changing the join to a blank line fixed it, and the difference is visible in these samples: headings like "Cleaning the Ears" and "Grain-free kibble or canned food" now sit directly above the text they introduce, instead of being scattered. It also changed my chunk count from 58 to 64, because real paragraph boundaries produce different splits than sentence-packing does.
+
+Two smaller fixes came out of the same round: a chunk may no longer *end* on a heading (headings move down to the next chunk, where their content is), and an overlap that lands on a fragment shorter than 40 characters is dropped instead of being carried over — that's what produced the stray "Do".
+
+**Known remaining issues**, which I chose not to fix:
+
+- Three of the 64 chunks are short leftovers from the end of a document — a vet's author bio, a rescue group's tagline. They're complete sentences rather than fragments, and on-topic enough to be harmless. A rule aggressive enough to remove them would take real content with it.
+- The Dimensions.com chunk includes that site's self-description ("a comprehensive reference database of dimensioned drawings…"), which isn't about dogs. It only appears in one document, so my repeated-line check can't see it.
+- My sentence splitter breaks on `!` and `?` even inside quotation marks, so a quote like `"whew! glad you are out of that awful place"` gets split in two. Both halves stayed in the same chunk here, but on a chunk boundary it would strand half a quote.
 
 ---
 

@@ -15,6 +15,7 @@ file should be the source name, like:
 Run it with:  python ingest.py
 """
 
+import random
 import re
 from pathlib import Path
 
@@ -234,11 +235,13 @@ def clean_text(text):
     lines = drop_menu_runs(lines)
     lines = drop_fragments_and_repeats(lines)
 
-    text = "\n".join(lines)
-
-    # Squash runs of blank lines down to one blank line, which is what the
-    # chunker uses to find paragraph breaks.
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Join with a BLANK line between blocks, not a single newline. Each line
+    # I kept is its own paragraph or heading, and the chunker looks for
+    # blank lines to find paragraph breaks. When I joined with "\n" the
+    # whole document came out as one giant paragraph, so the chunker skipped
+    # straight to sentence splitting every time and never split on
+    # paragraphs at all -- the opposite of the strategy in planning.md.
+    text = "\n\n".join(line for line in lines if line.strip())
 
     return text.strip()
 
@@ -293,13 +296,39 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
         elif len(current) + 2 + len(piece) <= chunk_size:
             current += "\n\n" + piece
         else:
+            # A heading belongs with the text underneath it, so if this
+            # chunk ends on one, hand it to the next chunk instead of
+            # leaving it dangling at the bottom with nothing after it.
+            current, moved = move_trailing_headings(current)
+
             chunks.append(current)
+
             # Start the next chunk with the tail of this one, so a sentence
             # sitting on the boundary shows up in both.
-            current = tail_of(current, overlap) + "\n\n" + piece if overlap else piece
+            tail = tail_of(current, overlap) if overlap else ""
+            current = "\n\n".join(p for p in [tail] + moved + [piece] if p)
+
+            # Carrying the overlap AND a moved heading can push the new
+            # chunk over the limit before I've added anything to it. The
+            # overlap is the least important of the three, so it goes.
+            if len(current) > chunk_size:
+                current = "\n\n".join(p for p in moved + [piece] if p)
 
     if current.strip():
-        chunks.append(current)
+        # Headings at the very end of a document have nothing under them,
+        # so they get dropped rather than moved forward.
+        current, _ = move_trailing_headings(current)
+        if current.strip():
+            chunks.append(current)
+
+    # Merge a tiny leftover at the end of a document into the chunk before
+    # it. Otherwise the last scrap of a page becomes its own chunk, which is
+    # how I ended up with a chunk that was just a rescue group's tagline.
+    # Only merge if it still fits, otherwise I'd blow past my 1,000 limit.
+    if (len(chunks) > 1 and len(chunks[-1]) < 250
+            and len(chunks[-2]) + len(chunks[-1]) + 2 <= chunk_size):
+        chunks[-2] = chunks[-2] + "\n\n" + chunks[-1]
+        chunks.pop()
 
     # Attach the source name to each chunk and drop any empties.
     return [
@@ -307,6 +336,25 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
         for c in chunks
         if c.strip()
     ]
+
+
+def move_trailing_headings(chunk):
+    """Take any headings off the end of a chunk.
+
+    A heading with nothing under it is useless on its own -- a chunk that
+    ends with "Basic Medical Care / Routine Medical Care" and stops tells
+    you nothing. Those lines belong at the top of the next chunk, with the
+    text they introduce.
+
+    Returns the trimmed chunk, plus the headings to move forward.
+    """
+    pieces = chunk.split("\n\n")
+    moved = []
+
+    while len(pieces) > 1 and not re.search(r"[.!?]", pieces[-1]):
+        moved.insert(0, pieces.pop())
+
+    return "\n\n".join(pieces), moved
 
 
 def tail_of(text, overlap):
@@ -325,11 +373,16 @@ def tail_of(text, overlap):
     # Prefer starting right after a . ! or ?
     sentence_start = re.search(r"[.!?]\s+", tail)
     if sentence_start:
-        return tail[sentence_start.end():]
+        tail = tail[sentence_start.end():]
+    else:
+        # No sentence break in the tail, so fall back to a word boundary.
+        space = tail.find(" ")
+        tail = tail[space + 1:] if space != -1 else tail
 
-    # No sentence break in the tail, so fall back to a word boundary.
-    space = tail.find(" ")
-    return tail[space + 1:] if space != -1 else tail
+    # If that left almost nothing, don't bother. I had a chunk start with
+    # the single word "Do" because the sentence break happened to fall two
+    # characters from the end. A two-letter overlap helps nobody.
+    return tail if len(tail.strip()) >= 40 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +418,8 @@ def build_chunks():
         )
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
         chunks = chunk_text(cleaned, doc["source"])
+        for chunk in chunks:
+            chunk["filename"] = doc["filename"]
         all_chunks.extend(chunks)
         print(f"{doc['filename']:45} {len(cleaned):7,} {len(chunks):7}")
 
@@ -387,18 +442,24 @@ def build_chunks():
 
 
 def print_samples(chunks, how_many=5):
-    """Print a few chunks spread across the collection so I can read them."""
+    """Print random chunks so I can read them.
+
+    I started out taking evenly spaced chunks, but that quietly picked the
+    same nice-looking ones every time. Switching to random turned up three
+    bad chunks in the first draw. The seed just means I get the same five
+    back each run, so I can fix something and compare.
+    """
     if not chunks:
         return
 
     print("\n" + "=" * 62)
-    print("SAMPLE CHUNKS")
+    print("SAMPLE CHUNKS (random)")
     print("=" * 62)
 
-    step = max(1, len(chunks) // how_many)
-    for n, chunk in enumerate(chunks[::step][:how_many], start=1):
+    random.seed(42)
+    for n, chunk in enumerate(random.sample(chunks, min(how_many, len(chunks))), start=1):
         print(f"\n--- Chunk {n} ({len(chunk['text'])} chars) ---")
-        print(f"Source: {chunk['source']}")
+        print(f"Source file: {chunk['filename']}")
         print(chunk["text"])
 
 
