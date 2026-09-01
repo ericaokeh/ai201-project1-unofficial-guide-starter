@@ -34,7 +34,9 @@ load_dotenv()
 # GROQ_MODEL in .env to use a different one.
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
-TOP_K = 6
+# The chunks are only 200 characters, so related facts often span several of
+# them. Eight keeps that context while hybrid retrieval improves their order.
+TOP_K = 8
 
 # Chroma always hands back k chunks, even for a question my documents can't
 # answer -- there is no "nothing found" result. So I drop anything past this
@@ -75,8 +77,17 @@ sentence needs a citation.
 I have don't cover that." Then say what they do cover that is closest. Do not \
 guess, and do not fill the gap from memory.
 
-4. If the sources disagree with each other, say so and give both positions \
-with their citations. Do not quietly pick one.
+4. If the sources genuinely disagree, say so and give both positions with \
+their citations. Do not quietly pick one. But check first that they are \
+describing the same thing: two figures with different labels are two \
+different measurements, not a contradiction. Report each with its own label.
+
+4b. Give every part of the answer the sources contain. If a source states \
+several relevant facts, do not stop after the first one.
+
+4c. Two numbered sources with the same name are two passages from ONE \
+document, not two documents. Never write "another source" about them -- \
+write "the same source also says", and never present them as disagreeing.
 
 5. If the sources only partly answer the question, answer the part they cover \
 and say which part they don't.
@@ -95,11 +106,21 @@ def format_context(hits):
     the model cites, and they let me check afterwards whether a claim in the
     answer really came from the chunk it points at.
     """
+    # Several of the numbered sources are usually different passages of the
+    # same document. Saying so explicitly stops the model reporting two
+    # passages of one page as "two sources", which it did on my size
+    # question -- it called a withers height and a standing height from the
+    # same Dimensions.com page a disagreement between sources.
+    seen = {}
+    for hit in hits:
+        seen[hit["source"]] = seen.get(hit["source"], 0) + 1
+
     blocks = []
     for n, hit in enumerate(hits, start=1):
-        blocks.append(
-            f"[{n}] Source: {hit['source']}\n{hit['body_text']}"
-        )
+        label = hit["source"]
+        if seen[label] > 1:
+            label += " (one of several passages from this same document)"
+        blocks.append(f"[{n}] Source: {label}\n{hit['body_text']}")
     return "\n\n".join(blocks)
 
 
@@ -175,12 +196,19 @@ def check_citations(text, hits):
     # its citation style a lot, and my first version only looked for plain
     # square brackets -- so a properly cited answer got flagged as having no
     # citations at all.
+    #
+    # The group has to be numbers and separators and nothing else. Accepting
+    # any short bracketed text read the "(33 - 38 cm)" in a height answer as
+    # a citation of source 33, and warned that source 33 didn't exist.
     cited = set()
+    citation = re.compile(r"^\s*\d+\s*([,;]\s*\d+\s*)*(†[^\s]*)?$")
     for group in re.findall(r"[\[\(【]([^\]\)】]{0,20})[\]\)】]", text):
+        if not citation.match(group):
+            continue
         # Split "1, 5" into two citations, then take the number each part
         # starts with. Taking every number in the group was wrong: the
         # citation 【1†L1-L2】 has a stray "2" in it that isn't a source.
-        for part in group.split(","):
+        for part in re.split(r"[,;]", group):
             match = re.match(r"\s*(\d+)", part)
             if match:
                 cited.add(int(match.group(1)))

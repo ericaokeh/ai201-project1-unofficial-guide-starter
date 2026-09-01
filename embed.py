@@ -8,7 +8,9 @@ metadata I'll need later for source attribution.
 Run it with:  python embed.py
 """
 
+import math
 import re
+from collections import Counter
 from pathlib import Path
 
 import chromadb
@@ -36,6 +38,39 @@ def normalise(text):
     """Drop the breed name, since every chunk is about the same breed."""
     text = BREED_WORDS.sub(" ", text)
     return re.sub(r"\s{2,}", " ", text).strip()
+
+
+# The same dilution that hurt oversized chunks also hurts long questions: an
+# embedding is an average over every token, so framing words drag the query
+# vector away from what the question is actually about. "What reason do rescue
+# groups give for saying a crate is not cruel?" spends eleven of its seventeen
+# words on scaffolding, and retrieved the answer at rank 20; "Is crating
+# cruel?" retrieves it at rank 1. These patterns strip the scaffolding and
+# leave the content words.
+QUERY_SCAFFOLD = [
+    re.compile(p, re.I) for p in (
+        r"^\s*(so|and|ok(ay)?|hi|hello)\b[,\s]*",
+        r"\b(what|which)\s+(reason|reasons|justification)\s+"
+        r"(do|does|did)\b.*?\bgive\s+for\s+(saying|claiming)\b",
+        r"\b(can|could)\s+you\s+(please\s+)?(tell\s+me|explain|say)\b",
+        r"\bi\s+(would\s+like|want|need)\s+to\s+know\b",
+        r"\b(what|how)\s+do\s+(rescue\s+groups|rescues|owners|breeders|"
+        r"vets|sources|the\s+documents)\s+say\s+(about|for)\b",
+        r"\baccording\s+to\s+(the\s+)?(documents|sources|rescue\s+groups)\b",
+        r"\bplease\b",
+    )
+]
+
+
+def normalise_query(text):
+    """Normalise a question: breed name out, framing words out.
+
+    Only used on the query side. The chunks never contain this kind of
+    scaffolding, so there is nothing to strip from them.
+    """
+    for pattern in QUERY_SCAFFOLD:
+        text = pattern.sub(" ", text)
+    return normalise(text)
 
 
 def load_model():
@@ -142,48 +177,108 @@ def get_model():
     return _model
 
 
-def search(query, k=5):
-    """Find the k chunks closest in meaning to the query.
-
-    The query gets turned into a vector by the same model that embedded the
-    chunks, which is what lets this match on meaning instead of on shared
-    words -- "is my dog too skinny" can find a chunk about weight without
-    either one using the other's wording.
-
-    Returns a list of dicts, most relevant first:
-        {"text", "source", "filename", "position", "similarity"}
-    """
+def _semantic_results(query):
+    """Return every chunk in semantic-rank order with its real distance."""
     collection = get_collection()
-
-    # The query goes through the same treatment as the chunks did, otherwise
-    # I'd be comparing text that still says "Italian Greyhound" against
-    # chunks where I removed it.
-    query_vector = get_model().encode(normalise(query)).tolist()
-
+    query_vector = get_model().encode(normalise_query(query)).tolist()
     raw = collection.query(
         query_embeddings=[query_vector],
-        n_results=k,
+        n_results=collection.count(),
         include=["documents", "metadatas", "distances"],
     )
 
     results = []
-    for text, meta, distance in zip(
-        raw["documents"][0], raw["metadatas"][0], raw["distances"][0]
+    for chunk_id, text, meta, distance in zip(
+        raw["ids"][0], raw["documents"][0], raw["metadatas"][0],
+        raw["distances"][0],
     ):
         results.append({
+            "id": chunk_id,
             "text": text,
             "source": meta["source"],
             "filename": meta["filename"],
             "position": meta["position"],
-            # Chroma gives me cosine distance, where 0 means identical and
-            # bigger numbers mean less alike. I keep that, and also flip it
-            # round into a similarity score that goes up as the match gets
-            # better, because that reads more naturally.
             "distance": round(distance, 3),
             "similarity": round(1 - distance, 3),
         })
-
     return results
+
+
+def semantic_search(query, k=5):
+    """Semantic-only retrieval, kept so hybrid results can be compared."""
+    return _semantic_results(query)[:k]
+
+
+def _tokens(text):
+    """Lowercase words used by the small in-memory BM25 index."""
+    return re.findall(r"[a-z0-9]+", normalise(text).lower())
+
+
+def _bm25_scores(query, results, k1=1.5, b=0.75):
+    """Score the stored chunks with BM25; the corpus is only ~300 chunks."""
+    documents = [_tokens(hit["text"].split(": ", 1)[-1]) for hit in results]
+    query_terms = set(_tokens(normalise_query(query)))
+    if not query_terms or not documents:
+        return [0.0] * len(documents)
+
+    average_length = sum(map(len, documents)) / len(documents)
+    document_frequency = {
+        term: sum(term in document for document in documents)
+        for term in query_terms
+    }
+    scores = []
+    for document in documents:
+        counts = Counter(document)
+        score = 0.0
+        for term in query_terms:
+            frequency = counts[term]
+            if not frequency:
+                continue
+            inverse_frequency = math.log(
+                1 + (len(documents) - document_frequency[term] + 0.5)
+                / (document_frequency[term] + 0.5)
+            )
+            length_adjustment = frequency + k1 * (
+                1 - b + b * len(document) / average_length
+            )
+            score += inverse_frequency * frequency * (k1 + 1) / length_adjustment
+        scores.append(score)
+    return scores
+
+
+def search(query, k=5):
+    """Combine semantic and BM25 rankings with reciprocal rank fusion.
+
+    Semantic search handles paraphrases; BM25 promotes chunks containing rare
+    exact terms. Each result keeps its real cosine distance so the generation
+    layer can apply the same relevance cutoff after fusion.
+
+    Returns a list of dicts, most relevant first:
+        {"text", "source", "filename", "position", "similarity"}
+    """
+    semantic = _semantic_results(query)
+    semantic_rank = {hit["id"]: rank for rank, hit in enumerate(semantic, 1)}
+
+    keyword_scores = _bm25_scores(query, semantic)
+    keyword_order = sorted(
+        range(len(semantic)), key=lambda index: keyword_scores[index], reverse=True
+    )
+    keyword_rank = {
+        semantic[index]["id"]: rank
+        for rank, index in enumerate(keyword_order, 1)
+        if keyword_scores[index] > 0
+    }
+
+    # RRF avoids trying to compare cosine distances and BM25 scores directly.
+    # 60 is the conventional smoothing constant and keeps either ranker from
+    # dominating because of one unusually strong raw score.
+    for hit in semantic:
+        score = 1 / (60 + semantic_rank[hit["id"]])
+        if hit["id"] in keyword_rank:
+            score += 1 / (60 + keyword_rank[hit["id"]])
+        hit["fusion_score"] = round(score, 6)
+
+    return sorted(semantic, key=lambda hit: hit["fusion_score"], reverse=True)[:k]
 
 
 def print_results(query, k=5):
