@@ -381,6 +381,23 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
     # Merge a tiny leftover at the end of a document into the chunk before
     # it. Otherwise the last scrap of a page becomes its own chunk, which is
     # how I ended up with a chunk that was just a rescue group's tagline.
+    # A chunk that is only a heading has no information in it. Retrieval
+    # still finds it, and the model then cites it as if it were evidence --
+    # I got an answer saying "the signs are listed in the 'Signs your
+    # sighthound is a chilly billy' section" instead of listing the signs.
+    # So a heading-only chunk gets glued onto the front of the next one,
+    # even if that pushes the chunk over its size limit.
+    merged = []
+    for chunk in chunks:
+        if merged and is_heading(merged[-1]):
+            merged[-1] = merged[-1] + "\n\n" + chunk
+        else:
+            merged.append(chunk)
+    # A heading left at the very end has nothing to attach to, so it goes.
+    if merged and is_heading(merged[-1]):
+        merged.pop()
+    chunks = merged
+
     # Only merge if it still fits, otherwise I'd blow past my 1,000 limit.
     if (len(chunks) > 1 and len(chunks[-1]) < 250
             and len(chunks[-2]) + len(chunks[-1]) + 2 <= chunk_size):

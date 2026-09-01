@@ -211,8 +211,9 @@ def format_answer(text, hits):
         out.append("\nSources:")
         for n, hit in enumerate(hits, start=1):
             used = "*" if n in check["cited"] else " "
-            out.append(f" {used}[{n}] {hit['source']}  "
-                       f"(chunk {hit['position']}, distance {hit['distance']})")
+            out.append(f" {used}[{n}] {hit['source']}")
+            out.append(f"      file: {hit['filename']}  "
+                       f"chunk {hit['position']}  distance {hit['distance']}")
         out.append("  * = cited in the answer above")
 
         # Warn me when the model didn't follow the citation rule.
@@ -259,10 +260,11 @@ def launch_ui():
             return text, "_No sources — nothing in my documents matched._"
 
         check = check_citations(text, hits)
-        rows = ["| | Source | Chunk | Distance |", "|---|---|---|---|"]
+        rows = ["| | Source | File | Chunk | Distance |",
+                "|---|---|---|---|---|"]
         for n, hit in enumerate(hits, start=1):
             used = "cited" if n in check["cited"] else ""
-            rows.append(f"| [{n}] {used} | {hit['source']} | "
+            rows.append(f"| [{n}] {used} | {hit['source']} | `{hit['filename']}` | "
                         f"{hit['position']} | {hit['distance']} |")
 
         if check["invented"]:
