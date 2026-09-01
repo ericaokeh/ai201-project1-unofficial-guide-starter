@@ -21,6 +21,19 @@ python app.py                 # web interface at http://localhost:7860
 
 ---
 
+## Demo Video
+
+**Link:** _(paste the link here once recorded)_
+
+What the video covers:
+
+- Three different queries answered, with the source citations visible in the output
+- One query where retrieval works well — the PRA question, where the answer is spread across three consecutive chunks and all three come back
+- One query where the system fails — the crating question, where the chunk holding the documented answer ranks 20th and never reaches the model
+- A walkthrough of the evaluation report below
+
+---
+
 ## Domain
 
 Day-to-day care and ownership of Italian Greyhounds — what the breed is actually like to live with, rather than what a breed profile page says about it.
