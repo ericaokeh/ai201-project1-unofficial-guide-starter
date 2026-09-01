@@ -324,6 +324,28 @@ def split_into_sentences(paragraph):
     return [p.strip() for p in parts if p.strip()]
 
 
+def split_into_pieces(text, chunk_size):
+    """Break a document into the smallest parts I'll build chunks from.
+
+    This is the recursive bit: paragraphs first, and a paragraph only gets
+    broken into sentences if it's too big to fit in a chunk on its own.
+
+    A sentence longer than the limit is kept whole and allowed to go over,
+    rather than sliced in the middle. Slicing produced chunks that trailed
+    off like "...because of their slim", and an oversized chunk is a much
+    smaller problem than a broken one.
+    """
+    pieces = []
+    for paragraph in (p.strip() for p in text.split("\n\n")):
+        if not paragraph:
+            continue
+        if len(paragraph) <= chunk_size:
+            pieces.append(paragraph)
+        else:
+            pieces.extend(split_into_sentences(paragraph))
+    return pieces
+
+
 def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
     """Split one document into chunks.
 
@@ -334,23 +356,7 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
     # what gets embedded any more, so it doesn't eat into the chunk budget.
     label = f"{source}: "
 
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-
-    # Build a list of pieces that are all small enough to fit in a chunk.
-    pieces = []
-    for paragraph in paragraphs:
-        if len(paragraph) <= chunk_size:
-            pieces.append(paragraph)
-            continue
-
-        # Too long, so go down a level to sentences.
-        for sentence in split_into_sentences(paragraph):
-            # A sentence longer than the limit is kept whole and allowed to
-            # go over, rather than sliced in the middle. Slicing produced
-            # chunks that trailed off like "...because of their slim", which
-            # are useless on their own. A slightly oversized chunk is a much
-            # smaller problem than a broken one.
-            pieces.append(sentence)
+    pieces = split_into_pieces(text, chunk_size)
 
     # Now pack the pieces into chunks, filling each one up to chunk_size.
     chunks = []
@@ -466,7 +472,7 @@ def move_trailing_headings(chunk):
     pieces = chunk.split("\n\n")
     moved = []
 
-    while len(pieces) > 1 and not re.search(r"[.!?]", pieces[-1]):
+    while len(pieces) > 1 and is_heading(pieces[-1]):
         moved.insert(0, pieces.pop())
 
     return "\n\n".join(pieces), moved
