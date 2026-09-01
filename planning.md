@@ -66,13 +66,34 @@ If I made chunks smaller, like 500, a health issue would get split in two. The d
 
 The 150-character overlap means the end of one chunk is repeated at the start of the next, so a sentence sitting right on the line doesn't get lost.
 
-**Two things I have to watch out for:**
+**How I load the documents:**
 
-1. **Junk text on the pages.** The vet page has about 2,500 words of menus, footers, and clinic addresses — more than the actual article. If I chunk the whole page, some chunks will just be menu links, and a question like "what should I feed my dog" could match a footer link that says "Nutrition Consults." So I need to grab only the article text before chunking.
+Each of my 10 sources is saved as a plain `.txt` file in `documents/`, holding the page's text exactly as it appears on the site.
 
-2. **Two of my sources are really short.** The Adopt-a-Pet barking answer is only about 70 words and the dimensions.com page is mostly measurements. Those should just stay as one small chunk each instead of getting merged with something else.
+My first attempt pulled the pages down and tried to pick out the article automatically, using a different rule for each site — one page needed `#main_content`, another needed `article`, the older rescue pages use table layouts with neither. That got complicated fast and broke on the two sites that don't follow the pattern. So I dropped it and went the other way: save all of the page's text, junk included, and let one set of cleaning rules in `ingest.py` sort out the menus and footers afterwards. That's simpler, and it works the same on all 10 pages.
 
-I'm also going to put the source name at the front of each chunk, like `Italian Greyhound Diet — Weight Maintenance: ...`, so it's easier to tell where an answer came from.
+The first line of each file is the source name. That line becomes the label on every chunk that comes out of that file.
+
+**How I clean each document:**
+
+Even copied-by-hand text drags along some junk, so `clean_text()` in `ingest.py` does four things:
+
+1. **Fixes HTML entities.** `&amp;` becomes `&`, `&nbsp;` becomes a space, and curly quotes become straight ones.
+2. **Strips any leftover HTML tags** with a regular expression, in case something like `<div>` came along with the copy.
+3. **Throws out site furniture**, one line at a time. This is the important part, and it took three tries to get right:
+   - Any line containing an obvious junk phrase is dropped — "cookie", "privacy policy", "©", "subscribe", "share on", "comment", "sponsored", and so on. I need this list because cookie banners and footers are written as complete sentences, so my next rule would let them through.
+   - Any line with a period, question mark, or exclamation mark is real writing, so I keep it.
+   - Whatever's left has no sentence punctuation. That's either a heading ("Feeding and Weight Maintenance") or a row of menu links ("Find a pet Adopt a dog Adopt a cat Find a shelter"). I tell them apart by counting words: 7 words or fewer and under 60 characters is a heading, anything longer is a menu.
+4. **Squashes extra blank lines** down to one, since blank lines are what the chunker uses to find paragraph breaks.
+
+I tested this against a list of every junk type the assignment names — nav menus, cookie banners, ads, footers, repeated headers, "Read more" links, share buttons, comment counts — and it removes all of them while keeping real headings, sentences, and spec lines like "Weight: 7-14 lb."
+
+**What it still gets wrong:** a bare short menu item like "Find a pet" survives, because it looks exactly like a real heading such as "Crates." I decided to live with it — the rule that would remove it would also remove my headings, and a stray 10-character line just gets absorbed into the paragraph next to it instead of becoming its own chunk.
+
+**Other things to watch out for:**
+
+- **Two of my sources are really short.** The Adopt-a-Pet barking answer is only about 70 words and the dimensions.com page is mostly measurements. There's no minimum chunk size in my code, so those stay as one small chunk each instead of being merged into something else.
+- **The source name takes up room.** I put the source at the front of every chunk, like `Southern Cross Vet - 10 Common Health Issues: ...`, so I can always tell where an answer came from. That label is part of the 1,000 characters, so the code subtracts its length from the budget before packing. Without that, a full chunk plus a long source name came out over 1,000.
 
 **Estimated chunk count:** about 70–100 total.
 
@@ -151,20 +172,21 @@ For a class project MiniLM is the right call. For real users I'd probably pay fo
      You'll use this diagram as context when prompting AI tools to implement each stage. -->
 
 ```
-   10 saved web pages
+   10 sources saved as .txt
    (documents/ folder)
            |
            v
 +---------------------------+
-| 1. INGESTION              |   Read each .txt/.html file.
-|    Python, built-in open()|   Strip out menus, footers, and
-|                           |   ads so only article text is left.
+| 1. INGESTION + CLEANING   |   load_documents() reads each .txt.
+|    Python, pathlib + re   |   clean_text() fixes HTML entities,
+|    (ingest.py)            |   strips tags, and drops menus,
+|                           |   cookie banners, and footers.
 +---------------------------+
            |
            v
 +---------------------------+
 | 2. CHUNKING               |   Recursive split: paragraphs first,
-|    my own chunk_text()    |   then sentences.
+|    chunk_text()           |   then sentences.
 |                           |   1,000 chars, 150 overlap.
 |                           |   Add source name to each chunk.
 +---------------------------+
