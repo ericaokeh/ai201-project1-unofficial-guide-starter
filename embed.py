@@ -177,7 +177,7 @@ def get_model():
     return _model
 
 
-def _semantic_results(query):
+def _semantic_results(query, source=None):
     """Return every chunk in semantic-rank order with its real distance."""
     collection = get_collection()
     query_vector = get_model().encode(normalise_query(query)).tolist()
@@ -201,12 +201,14 @@ def _semantic_results(query):
             "distance": round(distance, 3),
             "similarity": round(1 - distance, 3),
         })
+    if source:
+        results = [hit for hit in results if hit["source"] == source]
     return results
 
 
-def semantic_search(query, k=5):
+def semantic_search(query, k=5, source=None):
     """Semantic-only retrieval, kept so hybrid results can be compared."""
-    return _semantic_results(query)[:k]
+    return _semantic_results(query, source=source)[:k]
 
 
 def _tokens(text):
@@ -246,7 +248,7 @@ def _bm25_scores(query, results, k1=1.5, b=0.75):
     return scores
 
 
-def search(query, k=5):
+def search(query, k=5, source=None):
     """Combine semantic and BM25 rankings with reciprocal rank fusion.
 
     Semantic search handles paraphrases; BM25 promotes chunks containing rare
@@ -256,7 +258,7 @@ def search(query, k=5):
     Returns a list of dicts, most relevant first:
         {"text", "source", "filename", "position", "similarity"}
     """
-    semantic = _semantic_results(query)
+    semantic = _semantic_results(query, source=source)
     semantic_rank = {hit["id"]: rank for rank, hit in enumerate(semantic, 1)}
 
     keyword_scores = _bm25_scores(query, semantic)

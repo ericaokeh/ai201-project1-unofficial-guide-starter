@@ -6,20 +6,20 @@ My domain is day-to-day care and ownership of Italian Greyhounds. Practical info
 
 ## Documents
 
-| # | Source | Topic |
-|---:|---|---|
-| 1 | Italian Greyhound Rescue Foundation | Diet |
-| 2 | Mid-Atlantic Iggy Rescue | Housetraining |
-| 3 | Southern Cross Vet | Health issues |
-| 4 | Houndtees | Keeping sighthounds warm |
-| 5 | Dimensions.com | Size |
-| 6 | Italian Greyhound Rescue Foundation | Color and patterns |
-| 7 | Italian Greyhound Rescue Foundation | General care |
-| 8 | Italian Greyhound Rescue Charity | Exercise |
-| 9 | Iggy Rescue | Compatibility with other pets |
-| 10 | Adopt-a-Pet | Barking |
+| # | Source | Topic | Saved document |
+|---:|---|---|---|
+| 1 | Italian Greyhound Rescue Foundation | Diet | `documents/ig_rescue_foundation__diet.txt` |
+| 2 | Mid-Atlantic Iggy Rescue | Housetraining | `documents/mid_atlantic_iggy_rescue__housetraining.txt` |
+| 3 | Southern Cross Vet | Health issues | `documents/southern_cross_vet__10_common_health_issues.txt` |
+| 4 | Houndtees | Keeping sighthounds warm | `documents/houndtees__keeping_your_sighthound_warm.txt` |
+| 5 | Dimensions.com | Size | `documents/dimensions_com__italian_greyhound_size.txt` |
+| 6 | Italian Greyhound Rescue Foundation | Color and patterns | `documents/ig_rescue_foundation__coloration_and_patterns.txt` |
+| 7 | Italian Greyhound Rescue Foundation | General care | `documents/ig_rescue_foundation__caring_for_iggys.txt` |
+| 8 | Italian Greyhound Rescue Charity | Exercise | `documents/ig_rescue_charity_uk__exercise.txt` |
+| 9 | Iggy Rescue | Compatibility with other pets | `documents/iggy_rescue__other_pets_and_italian_greyhounds.txt` |
+| 10 | Adopt-a-Pet | Barking | `documents/adopt_a_pet__do_italian_greyhounds_bark_a_lot.txt` |
 
-The exact URLs are listed in README.md. Each page is saved as a plain-text file in `documents/`.
+The source URLs are also listed in README.md.
 
 ## Chunking Strategy
 
@@ -34,6 +34,10 @@ The embedding model is `all-MiniLM-L6-v2` through sentence-transformers. It runs
 For production I would compare domain accuracy, context length, multilingual support, latency, privacy, and API cost before choosing a larger hosted model.
 
 **Stretch update — Hybrid Search:** After semantic-only search missed the exact crating explanation, I added BM25 keyword ranking and reciprocal rank fusion. A separate semantic-only function preserves the baseline for comparison. Keyword-promoted chunks retain their cosine distances and must pass the same generation cutoff.
+
+**Stretch update — Metadata Filtering:** Add an optional source dropdown to the interface and pass the selected source through generation to retrieval. Filtering should visibly limit returned chunks to that source.
+
+**Stretch update — Conversational Memory:** Store recent question-answer pairs in Gradio state. For pronoun-based follow-ups, include the previous question when retrieving and generating so references such as “they” have context.
 
 ## Evaluation Plan
 
@@ -83,3 +87,4 @@ Gradio interface (question, answer, retrieved sources)
 2. **Embedding and retrieval:** Give the AI the Retrieval Approach and chunk output format and request Chroma storage and a function returning ranked chunks with source metadata and distances. I will test at least three evaluation questions before generation.
 3. **Generation and interface:** Give the AI the grounding, refusal, citation, and output requirements and request a Groq generation function plus a Gradio page. I will verify that sources are constructed from retrieved metadata rather than invented by the model.
 4. **Stretch feature:** Give the AI the failed-query ranks and ask for ways to combine semantic and keyword retrieval. I will preserve the semantic baseline, measure the comparison, and ensure keyword results cannot bypass the distance cutoff.
+5. **Metadata and memory stretch features:** Ask the AI to pass a source filter through the existing retrieval pipeline and add minimal Gradio state for follow-up questions. I will verify that filtering changes the returned sources and that a pronoun-based second question uses the first question’s context.

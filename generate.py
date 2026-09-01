@@ -137,9 +137,9 @@ def build_messages(question, hits):
     ]
 
 
-def retrieve_for(question, k=TOP_K, max_distance=MAX_DISTANCE):
+def retrieve_for(question, k=TOP_K, max_distance=MAX_DISTANCE, source=None):
     """Search, then throw away anything too far away to be relevant."""
-    hits = search(question, k=k)
+    hits = search(question, k=k, source=source)
 
     for hit in hits:
         # The stored text has the source name on the front. Strip it so the
@@ -150,9 +150,22 @@ def retrieve_for(question, k=TOP_K, max_distance=MAX_DISTANCE):
     return [hit for hit in hits if hit["distance"] <= max_distance]
 
 
-def answer(question, k=TOP_K, show_sources=True):
+FOLLOW_UP_WORDS = re.compile(
+    r"\b(it|its|they|them|their|that|this|those|these|he|she)\b", re.I
+)
+
+
+def contextualise_question(question, history=None):
+    """Resolve a simple follow-up by including the previous user question."""
+    if history and FOLLOW_UP_WORDS.search(question):
+        return f"{history[-1][0]} Follow-up question: {question}"
+    return question
+
+
+def answer(question, k=TOP_K, show_sources=True, source=None, history=None):
     """Answer one question. Returns (answer_text, hits_used)."""
-    hits = retrieve_for(question, k=k)
+    effective_question = contextualise_question(question, history)
+    hits = retrieve_for(effective_question, k=k, source=source)
 
     # Nothing relevant came back, so don't even call the model. This is the
     # cheapest and most reliable refusal I can do -- no prompt can be
@@ -170,7 +183,7 @@ def answer(question, k=TOP_K, show_sources=True):
     try:
         response = client.chat.completions.create(
             model=MODEL,
-            messages=build_messages(question, hits),
+            messages=build_messages(effective_question, hits),
             # Low temperature. I want it repeating the documents, not being
             # creative.
             temperature=0.1,

@@ -6,6 +6,14 @@ A RAG question-answering system grounded in 10 saved rescue, veterinary, and own
 
 **Demo video:** https://drive.google.com/file/d/1TmVIU1ycSrH6cPZVJlqd9Xi_Y38MUi8F/view?usp=sharing
 
+The video demonstrates these three queries with citations and retrieved sources visible:
+
+1. **“What are the early signs of Progressive Retinal Atrophy in an Italian Greyhound?”** — the strong retrieval example.
+2. **“Do Italian Greyhounds get along with cats?”** — a grounded answer that preserves the source’s qualifications.
+3. **“What reason do rescue groups give for saying a crate is not cruel for an Italian Greyhound?”** — the documented retrieval failure and hybrid-search improvement.
+
+The metadata-filtering and conversational-memory stretch features are demonstrated in the source and documented under Query Interface; they are not shown in this video.
+
 ## Run It
 
 ```bash
@@ -67,6 +75,17 @@ For production, I would compare embedding accuracy on breed-specific terminology
 
 `embed.py` ranks chunks with both Chroma semantic similarity and in-memory BM25 keyword scoring, then combines the rankings with reciprocal rank fusion. Semantic search handles paraphrases; BM25 helps rare exact terms. Keyword-promoted results retain their real cosine distance, so the generation layer’s 0.85 cutoff still applies.
 
+I compared semantic-only and hybrid retrieval on four queries:
+
+| Query | Semantic-only result | Hybrid result | Better method |
+|---|---|---|---|
+| Barking | Top 3: direct qualification, direct answer, housetraining signal | Same three chunks, with the direct answer moved to rank 1 | Tie; hybrid ordering is slightly clearer |
+| PRA signs | Top 3: symptoms, PRA heading, gradual blindness | Top 3: symptoms, PRA heading, unrelated hypothyroidism signs | Semantic; its third result remains relevant |
+| Crating reason | Correct “den animals” chunk at rank 7 | Correct chunk at rank 4 | Hybrid; the needed evidence enters the top results |
+| Overweight risk | Correct “vital organs” and “not built to carry weight” chunks at ranks 1 and 2 | Correct chunks fall to ranks 10 and 15 | Semantic; hybrid keyword matches displace the answer |
+
+Hybrid search therefore fixes the crating failure but is not universally better. The comparison also exposed the current overweight failure documented below.
+
 ### Retrieval Tests
 
 Distances below are cosine distance; lower is more similar. Results are listed in hybrid rank order.
@@ -113,17 +132,18 @@ All three come from the relevant temperature guide; two contain direct evidence 
 
 ### Example Responses
 
-**Covered question:** “How can I tell if my Italian Greyhound is cold?”
+**Covered question:** “Do Italian Greyhounds bark a lot?”
 
-> Cold ears and cold paw pads indicate that the dog needs warming, and a body that feels cool rather than warm suggests the dog is chilly [2][3][5].
+> Italian Greyhounds are generally not excessive barkers and are relatively quiet compared with many other breeds [1]. However, like all dogs they may bark when they are excited, nervous, or seeking attention [2].
 
-The displayed sources identify the numbered Houndtees chunks, positions, and distances.
+- [1] Adopt-a-Pet — Do Italian Greyhounds Bark a Lot?, chunk 0, distance 0.346
+- [2] Adopt-a-Pet — Do Italian Greyhounds Bark a Lot?, chunk 1, distance 0.299
 
-**Covered question:** “Do Italian Greyhounds get along with cats?”
+**Covered question:** “Why do rescue groups say a crate is not cruel?”
 
-> It depends on the individual animals. Some Italian Greyhounds chase cats, some are afraid after bad experiences, and some live harmoniously with them [1][4][6]. A cat’s personality and history with other animals also matter [5].
+> Rescue groups say crating isn’t cruel because dogs are den-type animals and naturally benefit from having their own “room” to retreat to [4].
 
-The displayed sources point to the Iggy Rescue other-pets page.
+- [4] Mid-Atlantic Iggy Rescue — Housetraining, chunk 37, distance 0.480
 
 **Out-of-scope question:** “What is the capital of France?”
 
@@ -133,36 +153,66 @@ All eight candidates exceed the distance cutoff, so the model is not called.
 
 ## Query Interface
 
-`app.py` provides a Gradio question textbox and Ask button, an answer box containing inline citations, and a source box containing source names, filenames, chunk positions, distances, and citation-use markers.
+`app.py` provides a Gradio question textbox and Ask button, an optional source filter, an answer box containing inline citations, and a source box containing source names, filenames, chunk positions, distances, and citation-use markers.
 
 ```text
 Question: Do Italian Greyhounds bark a lot?
-Answer: They are generally quiet, although they may bark when excited,
-nervous, or seeking attention [1][2].
-Retrieved from: Adopt-a-Pet chunks 0 and 1, with distances shown.
+Answer: Italian Greyhounds are generally not excessive barkers and are
+relatively quiet compared with many other breeds [1]. However, like all dogs
+they may bark when excited, nervous, or seeking attention [2].
+
+Retrieved from:
+*[1] Adopt-a-Pet — Do Italian Greyhounds Bark a Lot?
+     file: adopt_a_pet__do_italian_greyhounds_bark_a_lot.txt
+     chunk 0, distance 0.346
+*[2] Adopt-a-Pet — Do Italian Greyhounds Bark a Lot?
+     file: adopt_a_pet__do_italian_greyhounds_bark_a_lot.txt
+     chunk 1, distance 0.299
+```
+
+### Metadata Filtering Stretch Feature
+
+The source dropdown filters retrieval using each chunk’s `source` metadata. For example, “How can I tell if my Italian Greyhound is cold?” normally returns Houndtees temperature passages. Selecting **Southern Cross Vet — 10 Common Health Issues** before asking the same question restricts every returned result to that veterinary source, visibly changing the source list. The filter is implemented by the `source` argument in `search()`, `retrieve_for()`, and `answer()`.
+
+### Conversational Memory Stretch Feature
+
+The Gradio state retains the last five question-answer pairs. When a follow-up contains a reference such as “they,” “it,” or “that,” `contextualise_question()` includes the preceding user question in retrieval and generation. The Clear conversation button resets the state.
+
+Demo exchange:
+
+```text
+User: How tall and heavy is a typical Italian Greyhound?
+System: They stand 13–15 inches at the withers and weigh about 7–14 lb [1].
+
+User: How much do they weigh?
+System: A typical Italian Greyhound stands about 13–15 in at the withers [2].
+Its usual weight is 7–14 lb (3–6 kg) [2].
+Interface status: Used the previous question for context.
 ```
 
 ## Evaluation Report
 
-These responses were recorded after the required semantic-retrieval and prompt fixes, before adding the later hybrid-search stretch feature.
+These are verbatim responses from the current hybrid system, recorded on September 1, 2026.
 
-| # | Question | Expected answer | Recorded response summary | Judgment |
+| # | Question | Expected answer | Actual system response | Judgment |
 |---:|---|---|---|---|
-| 1 | Do Italian Greyhounds bark a lot? | Generally quiet; may bark from excitement, nervousness, or attention-seeking | Returned both the general answer and exceptions with citations | Accurate |
-| 2 | What are the early signs of PRA? | Night blindness and dilated pupils; gradual genetic blindness | Returned the signs and gradual decline with citations | Accurate |
-| 3 | Why is being overweight bad? | Organ strain, shorter life, and greater fracture and orthopedic risk | Returned organ, bone, joint, and fracture risks with citations | Accurate |
-| 4 | Why do rescues say a crate is not cruel? | Dogs are den animals and should have their own room | Returned the den-animal explanation with a citation | Accurate |
-| 5 | How tall and heavy is a typical IG? | 13–15 in at the withers and 7–14 lb | Returned both measurements and distinguished standing height | Accurate |
+| 1 | Do Italian Greyhounds bark a lot? | Generally quiet; may bark from excitement, nervousness, or attention-seeking | “Italian Greyhounds are generally not excessive barkers and are relatively quiet compared with many other breeds [1]. However, like all dogs they may bark when they are excited, nervous, or seeking attention [2].” | Accurate |
+| 2 | What are the early signs of PRA? | Night blindness and dilated pupils | “The early signs of Progressive Retinal Atrophy in an Italian Greyhound include night blindness and dilated pupils [1].” | Accurate |
+| 3 | Why is being overweight bad? | Organ strain, shorter life, and greater fracture and orthopedic risk | “The documents note that extra calories from people-food must be accounted for when keeping an Italian Greyhound at a healthy weight [1]. They also say that an overweight IG will hide the faint outline of ribs, vertebrae, hip points and a lean tuck, indicating excess body condition [2]. The sources do not explain why being overweight is harmful to an Italian Greyhound.” | **Inaccurate** |
+| 4 | Why do rescues say a crate is not cruel? | Dogs are den animals and should have their own room | “Rescue groups say crating isn’t cruel because dogs are den-type animals and naturally benefit from having their own ‘room’ to retreat to [4].” | Accurate |
+| 5 | How tall and heavy is a typical IG? | 13–15 in at the withers and 7–14 lb | “Italian Greyhounds are small dogs. One passage from Dimensions.com says they stand 13–15 inches (33–38 cm) at the withers and weigh about 7–14 lb (3–6 kg) [1]. Another passage from the same source gives a standing height of roughly 17–20 inches (43–51 cm) [3].” | Accurate |
 
-**Recorded score:** 5 accurate, 0 partially accurate, 0 inaccurate. The first run scored 3 accurate and 2 partially accurate; those failures produced the fixes below.
+**Score:** 4 accurate, 0 partially accurate, 1 inaccurate.
 
 ## Failure Case
 
-The crating question originally failed at retrieval. The chunk containing “dogs are den animals” ranked 20th, outside the six chunks sent to the model, so the answer discussed positive crate training without giving the requested reason.
+The current failure is the overweight question. Semantic-only retrieval ranks the two passages containing the expected answer first and second: one says extra weight strains vital organs and shortens life expectancy, and the other says the breed is not built to carry extra weight. Reciprocal rank fusion moves those passages to hybrid ranks 10 and 15, outside the top-eight generation window. The model therefore sees only calorie-management and body-shape passages and incorrectly concludes that the sources do not explain the harm. This is a retrieval-stage failure caused by keyword ranking displacing stronger semantic matches.
+
+The crating question shows the opposite outcome. It originally failed because the “dogs are den animals” chunk ranked 20th, outside the six chunks sent to the model.
 
 Removing query scaffolding moved the chunk to semantic rank 7. Hybrid retrieval then combined semantic and BM25 rankings and moved it to rank 4. Semantic retrieval captures meaning, while BM25 gives weight to the rare exact word “cruel.”
 
-Hybrid search still has a limitation: keyword matches can promote a passage that shares a word but discusses another subject, as shown by the hypothyroidism passage in the PRA test. The retained cosine distance makes weak matches visible, and the grounding prompt tells the model to use only passages that answer the question.
+Together, the cases show the tradeoff honestly: hybrid search improves an exact-word query but can hurt a query already handled well by semantic similarity. A production version should tune the fusion weights or retrieve a union of high-confidence semantic and keyword results so strong semantic matches cannot be pushed out.
 
 ## Spec Reflection
 
