@@ -46,15 +46,33 @@
      - Any preprocessing you did before chunking (e.g., stripping HTML, removing headers)
      - What your final chunk count was across all documents -->
 
-**Chunk size:** 1,000 characters (about 250 tokens), using recursive splitting — paragraphs first, then sentences, and only cutting mid-sentence as a last resort.
+**Chunk size:** 200 characters, using recursive splitting — paragraphs first, then sentences, with a new chunk started at every section heading. A sentence longer than 200 characters is kept whole rather than sliced.
 
-**Overlap:** 150 characters (15%), starting at a sentence boundary.
+**Overlap:** 30 characters (15%), starting at a sentence boundary.
 
 **Why these choices fit your documents:**
 
-Most of my sources are guides broken into sections, and those sections are consistently sized — each of the 10 health issues on the Southern Cross Vet page runs 150–200 words, and the housetraining sections are about the same. That's roughly 1,000 characters, so one chunk ends up holding about one section, and one section usually answers one question.
+I started at 1,000 characters, because that's about the size of one section in my sources — each of the 10 health issues on the Southern Cross Vet page runs 150–200 words, and the housetraining sections are similar. The idea was that one chunk would hold one section, and one section usually answers one question.
 
-At 500 characters a health issue would split in half, putting the disease name in one chunk and its symptoms in another. At 2,000 three unrelated conditions would be squashed together and the chunk would stop being about any one thing.
+Testing retrieval showed that was wrong, and taught me something I hadn't understood: **an embedding is an average over everything in the chunk.** A section-sized chunk holds one sentence that answers the question plus a lot of other material, and the other material pulls the vector away from the answer.
+
+I measured this on my crating question. The sentence "Crating is not cruel as dogs are den animals" scores **0.694** similarity against "Is crating cruel?" on its own. Inside its 898-character section chunk, it scored **0.072**. Adding just one neutral sentence about crates being a useful training tool dropped it from 0.598 to 0.340.
+
+So I tested all 5 of my evaluation questions at several sizes and counted how many retrieved their answer in the top 5:
+
+| Chunk size | Chunks | Answers found in top 5 |
+|---|---|---|
+| **200** | **293** | **5/5** |
+| 450 | 162 | 5/5 |
+| 600 | 118 | 4/5 |
+| 1,000 | 76 | 4/5 |
+
+200 wins, and gives the lowest distance scores. The cost is real: a chunk is now one or two sentences rather than a whole section, so each carries less context, and Chunk 2 in my samples below shows what that looks like at its weakest.
+
+Two related changes came out of the same testing:
+
+- **I stopped embedding the source name.** I was putting `Mid-Atlantic Iggy Rescue - Housetraining: ` on the front of every chunk *before* embedding it, so every vector contained a rescue group's name and the words "Italian Greyhound". That shared wording drowned out the words that distinguish chunks — searching `crate training` found the right chunk at rank 1, but `Is crating an Italian Greyhound cruel?` couldn't find it in the top 5 at all. The name is still stored in metadata and still shown with answers.
+- **I treat the breed name as a stopword.** Every document is about Italian Greyhounds, so the phrase carries no information about which chunk you want. Removing it from both chunks and queries moved my weight question from rank 20 to rank 2.
 
 **Preprocessing before chunking** (`clean_text()` in `ingest.py`):
 
@@ -65,111 +83,78 @@ At 500 characters a health issue would split in half, putting the disease name i
 - Dropped sentence fragments (lines starting with a lowercase letter or punctuation) and exact duplicate lines
 - Kept each surviving block as its own paragraph, separated by a blank line, so the chunker can find paragraph boundaries
 
-**Final chunk count:** **64 chunks** across 10 documents, from 49,433 characters of cleaned text. Sizes run 153 to 998 characters, averaging 772. That's inside the expected 50–2,000 range, and just under the 70–100 I estimated in planning.md — a bit lower because cleaning removed more boilerplate than I expected.
+**Final chunk count:** **293 chunks** across 10 documents, from 56,270 characters of cleaned text. Sizes run 64 to 363 characters, averaging 192. That's inside the expected 50–2,000 range. My planning.md estimate of 70–100 was made at the 1,000-character size and no longer applies.
 
-The per-document breakdown shows the chunker following the documents rather than cutting mechanically: the housetraining page (7,946 characters) produced 12 chunks and the vet page (7,245) produced 12, while the two very short sources produced 1 each. The 64 chunks have 62 distinct lengths, so nothing is being sliced at a fixed size.
+The per-document breakdown follows the documents rather than cutting mechanically: the housetraining page produced 36 chunks and the vet page 28, while the Adopt-a-Pet Q&A — the whole page is 386 characters — produced 1. Only 7 of the 293 chunks don't end on sentence punctuation, and those are section headings.
 
 ---
-
 ## Sample Chunks
 
-These are five **random** chunks printed by `python ingest.py`, copied exactly as they came out. Each one starts with its source name, because my chunker puts that at the front of every chunk.
+Five **random** chunks printed by `python ingest.py`, copied exactly as they came out. Each starts with its source name, which my chunker adds for display and attribution.
 
-I picked them randomly on purpose. My first version of the sampling took evenly spaced chunks, and it kept handing me the same good-looking ones. The first random draw turned up three bad chunks straight away.
+I take them at random rather than evenly spaced. My first version picked evenly spaced chunks and kept showing me the same good-looking ones; the first random draw turned up three bad chunks immediately.
 
-**Chunk 1** — from `ig_rescue_foundation__caring_for_iggys.txt` (683 characters)
+**Chunk 1** — from `ig_rescue_foundation__caring_for_iggys.txt` (166 characters)
 
-> IG Rescue Foundation - Caring for Iggys: stinky things found in their yard, it may be a good idea to give them a quick cleansing before they are ready to snuggle under the blankets at night.
+> IG Rescue Foundation - Caring for Iggys: Caring for Italian Greyhounds
 >
-> Cleaning the Ears
->
-> At a minimum keep monitor if your Italian Greyhound's ears are building up wax and dirt that may be irritating them, and causing them to itch or get infected. Heavy or dark buildup can be indicative of other problems such as an infection or ear mites even. Cleaning the ears isn't difficult but should be done with care. You should only clean the widest part of the ear, without entering the ear canal. If wax buildup is especially heavy, a veterinary visit may be needed.
+> Compared to many dog breeds, Italian Greyhounds are a relatively low maintenance breed of dog.
 
-*Stands on its own:* yes. Someone could answer "how do I clean my Italian Greyhound's ears?" from this chunk alone. It opens mid-sentence because that's the 150-character overlap carrying the tail of the previous chunk, so the sentence isn't lost from either one.
+*Stands on its own:* yes. It answers "are Italian Greyhounds high maintenance?" The section heading sits directly above the sentence it introduces, which is a rule I had to add — chunks used to end on a dangling heading with nothing under it.
 
 ---
 
-**Chunk 2** — from `houndtees__keeping_your_sighthound_warm.txt` (930 characters)
+**Chunk 2** — from `houndtees__keeping_your_sighthound_warm.txt` (98 characters)
 
-> Houndtees - Keeping Your Sighthound Warm: Please do what you can to warm them up, so they're happy to stretch back out or roach the day away – suggestions on that to come.
->
-> Their ears are cold
->
-> If your hound's ears are cold to the touch, they'll be feeling cold all over!
->
-> Their paw pads are cold
->
-> Doggos regulate heat through their paw pads, and if your hound's feetsies are cold, they need some warming up.
->
-> Are you cold?
->
-> If you're cold, your doggo won't be too far behind. Sighthound's bods do run at a higher base temp than hoomans, so they should typically feel warm to your touch. If you're cold, check your doggo's ears.
->
-> Shivering
->
-> Like hoomans, doggos will shiver to warm up. Not to be confused with chattering – sometimes, when greyhounds are excited, they'll chatter their teeth together, kinda like the dog equivalent of purring.
->
-> Shaking it off
->
-> Some greyhounds will attempt to shake off the cold like it were water.
+> Houndtees - Keeping Your Sighthound Warm: It don't take much for your sighthound to feel the cold!
 
-*Stands on its own:* yes. This fully answers "how can I tell if my sighthound is cold?" — it's a list of five signs, each with its heading attached to its explanation. This is the chunk I'd most want retrieved for that question, and it holds the whole answer.
+*Stands on its own:* barely. It's a complete sentence and it's on-topic, but it's the weakest of these five — it tells you sighthounds get cold without saying why or what to do about it. This is the honest cost of my 200-character chunk size: a short paragraph in the source becomes a thin chunk. The 30-character overlap means the following sentence appears at the start of the next chunk, so the fuller explanation is still retrievable, just not from this chunk alone.
 
 ---
 
-**Chunk 3** — from `iggy_rescue__other_pets_and_italian_greyhounds.txt` (722 characters)
+**Chunk 3** — from `ig_rescue_foundation__diet.txt` (146 characters)
 
-> Iggy Rescue - Other Pets and Italian Greyhounds: there will be exceptions, so it is always best to fill our an adoption application completely and accurately to help ensure a successful placement.
->
-> Iggys and Cats
->
-> More often than not, the cats are usually more particular about a dog coming in to their house than vice versa. People with cats know their cat's personality or personalities, if they have been accepting of other animals in the past, and how they may react. We do get some Italian Greyhounds in to rescue who have had bad experiences with cats in the past and are scared of them due to being attacked or scratched. And, on the opposite end of the spectrum, we also get IGs who are obsessed with chasing cats.
+> IG Rescue Foundation - Diet: Dog Food Advisor offers a rating system so you can research foods and choose a well-rated food that fits your budget.
 
-*Stands on its own:* yes. It answers "do Italian Greyhounds get along with cats?" The "Iggys and Cats" heading sits directly above the text it introduces, which is what tells you what the chunk is about.
+*Stands on its own:* yes. A complete, specific recommendation that answers "how do I choose a dog food?"
 
 ---
 
-**Chunk 4** — from `iggy_rescue__other_pets_and_italian_greyhounds.txt` (875 characters)
+**Chunk 4** — from `ig_rescue_foundation__diet.txt` (163 characters)
 
-> Iggy Rescue - Other Pets and Italian Greyhounds: Rescues get many questions about if Italian Greyhounds "get along" with other dogs, tolerate cats or birds, or are safe around other animals even. And, the answer to most of those questions is the same and simple... it really depends on the particular dog. The best way to know if a particular dogs gets along with other animals is to ask the rescue representative who is fostering the animal. They may or may not be able to tell you an answer based on if they have other pets in the house, or if the previous owners have supplied such information upon surrendering the IG. Although our approval process sometimes seems lengthy, we include a home visit so we can help introduce a dog in to a new environment, existing pets, and to feel comfortable that the dogs we love are going to a home where we also feel they will thrive.
+> IG Rescue Foundation - Diet: Avoid non-specific ingredients such as meat, meat meal, meat and bone meal, blood meal, poultry meal, liver meal, glandular meal, etc.
 
-*Stands on its own:* yes. It's one complete argument — that compatibility depends on the individual dog, and how to find out about a specific one. Note this is a second chunk from the same document as Chunk 3, covering a different part of it, which is what I want.
-
----
-
-**Chunk 5** — from `ig_rescue_foundation__diet.txt` (915 characters)
-
-> IG Rescue Foundation - Diet: Avoid "flavors", digests, and color dyes.
->
-> Grain-free kibble or canned food
->
-> Some Italian Greyhounds are sensitive to grains (corn, wheat, rice, oats, barley, rye, soybeans, millet, etc.), and enjoy better health when fed a grain-free food. It is important to remember that any grain-free kibble will have an alternative carbohydrate source such as sweet potato, peas, or potato, and some dogs also have difficulty with these alternative carbohydrates. A grain-free diet is especially worth considering if your dog has an existing health condition such as allergies, skin issues, chronic ear infections, immune issues, and digestive issues.
->
-> IGs are not built to carry excess weight. Excess weight creates an increased workload for vital organs, reduces life expectancy, and increases the risk of leg break and other orthopedic issues through added strain on muscles, bones, and joints.
-
-*Stands on its own:* yes. It answers "should I feed my Italian Greyhound grain-free food?" It holds two topics — grain-free diets and weight — which is the cost of filling a chunk up to 1,000 characters, but both are about feeding so the chunk still has a clear subject.
+*Stands on its own:* yes. It answers "what ingredients should I avoid in my IG's food?" and the list is complete rather than cut off partway.
 
 ---
 
-### What I had to debug before these were usable
+**Chunk 5** — from `ig_rescue_foundation__diet.txt` (354 characters)
 
-Random sampling found problems that my evenly spaced sampling had hidden. Three rounds of fixes:
+> IG Rescue Foundation - Diet: Some owners who feed a raw diet choose from a variety of pre-made brands that are available at better pet food stores; these options range from patties or nuggets of frozen raw food which can be defrosted and fed as needed, to freeze-dried or dehydrated raw food which are shelf-stable and can be mixed with water and served.
 
-**Round 1 — repeated site banners.** Two chunks opened with the same text: "Wren is a fighter…" and an all-caps scam warning. Four of my sources are pages on the same rescue website, so every one of them carried that banner. They're real sentences about Italian Greyhounds, so no line-by-line rule could catch them. The fix was to compare documents against each other — any line appearing in 3 or more of my 10 documents is site furniture. That removed 9 lines.
+*Stands on its own:* yes. This one is 354 characters, well over my 200-character target, because it's a single sentence and I keep long sentences whole rather than slicing them. An oversized chunk is a much smaller problem than one that trails off mid-word.
 
-**Round 2 — interface text and dead links.** The Adopt-a-Pet chunk contained "Loading…", "Enter e-mail", "Send", and three "Related Questions" the page links to but never answers. I added a list of whole lines that are always buttons, and a rule treating a short standalone question as a link rather than as writing.
+**One thing this draw shows about my collection:** three of these five came from the diet document. That's not a bug — it's my longest-per-topic source and produced 18 chunks — but it's a reminder that my chunks aren't spread evenly across sources, so a query has more ways to land in the diet document than in the barking one.
 
-**Round 3 — the real bug.** A chunk started with the single word "Do". Chasing it down, I found my cleaning function joined lines with a single newline while my chunker splits paragraphs on blank lines. So every document arrived at the chunker as **one enormous paragraph**, and the paragraph step never ran — it fell through to sentence splitting every single time. My planning.md says "paragraphs first, then sentences," and that had not been true of my code at all.
+---
 
-Changing the join to a blank line fixed it, and the difference is visible in these samples: headings like "Cleaning the Ears" and "Grain-free kibble or canned food" now sit directly above the text they introduce, instead of being scattered. It also changed my chunk count from 58 to 64, because real paragraph boundaries produce different splits than sentence-packing does.
+### What I had to debug
 
-Two smaller fixes came out of the same round: a chunk may no longer *end* on a heading (headings move down to the next chunk, where their content is), and an overlap that lands on a fragment shorter than 40 characters is dropped instead of being carried over — that's what produced the stray "Do".
+Each round of problems was found by reading output, not by guessing.
 
-**Known remaining issues**, which I chose not to fix:
+**Round 1 — repeated site banners.** Two chunks opened with "Wren is a fighter…" and an all-caps scam warning. Four of my sources are pages on the same rescue website and all carried that banner. They're real sentences about Italian Greyhounds, so no line-by-line rule could catch them. Fix: compare documents against each other and drop any line appearing in 3 or more of the 10.
 
-- Three of the 64 chunks are short leftovers from the end of a document — a vet's author bio, a rescue group's tagline. They're complete sentences rather than fragments, and on-topic enough to be harmless. A rule aggressive enough to remove them would take real content with it.
-- The Dimensions.com chunk includes that site's self-description ("a comprehensive reference database of dimensioned drawings…"), which isn't about dogs. It only appears in one document, so my repeated-line check can't see it.
-- My sentence splitter breaks on `!` and `?` even inside quotation marks, so a quote like `"whew! glad you are out of that awful place"` gets split in two. Both halves stayed in the same chunk here, but on a chunk boundary it would strand half a quote.
+**Round 2 — interface text.** The Adopt-a-Pet chunk contained "Loading…", "Enter e-mail", "Send", and three "Related Questions" that page links to but never answers. Fix: a list of whole lines that are always buttons, plus treating a short standalone question as a link rather than as writing. Later I found the Houndtees shop pages carried promo banners too ("$12 SHIPPING OVER $175", "TARIFFS & DUTIES INCLUDED") and added those.
+
+**Round 3 — paragraphs weren't being split.** A chunk started with the single word "Do". Tracing it, my cleaning function joined lines with a single newline while the chunker splits paragraphs on blank lines, so every document arrived as **one enormous paragraph** and the paragraph step never ran. It fell through to sentence splitting every time — the opposite of the recursive strategy in planning.md. Changing the join to a blank line fixed it and put headings above the text they introduce.
+
+**Round 4 — cleaning was deleting answers.** This was the worst one, and I only found it because retrieval failed. The housetraining page says *"Crating is **not** cruel as dogs are den animals."* The bold `not` splits that into three separate pieces in the HTML, and my fragment rule deleted the lowercase piece — destroying the answer to one of my own test questions. Fragments are now rejoined onto the unfinished line above them, which recovered about 4,000 characters across the whole collection. Getting this fix backwards would have stored "Crating is cruel", so I checked the `not` survived.
+
+**Known remaining issues:**
+
+- The Dimensions.com document includes that site's self-description ("a comprehensive reference database of dimensioned drawings…"), which isn't about dogs. It only appears in one document, so my repeated-line check can't see it.
+- A bare short menu item like "Find a pet" would still survive, because it's shaped exactly like a real heading such as "Crates".
+- My sentence splitter breaks on `!` and `?` even inside quotation marks, so `"whew! glad you are out of that awful place"` splits in two.
 
 ---
 
