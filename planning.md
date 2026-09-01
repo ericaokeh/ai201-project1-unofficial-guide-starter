@@ -46,11 +46,11 @@ This is hard to find through official channels because kennel club and vet clini
 
 **Chunk size:**
 
-1,000 characters (about 250 tokens).
+200 characters. *(Changed from 1,000 after testing retrieval — see "Why I changed the chunk size" below.)*
 
 **Overlap:**
 
-150 characters (15%).
+30 characters (15%).
 
 **Strategy:** Recursive chunking.
 
@@ -95,7 +95,30 @@ I tested this against a list of every junk type the assignment names — nav men
 - **Two of my sources are really short.** The Adopt-a-Pet barking answer is only about 70 words and the dimensions.com page is mostly measurements. There's no minimum chunk size in my code, so those stay as one small chunk each instead of being merged into something else.
 - **The source name takes up room.** I put the source at the front of every chunk, like `Southern Cross Vet - 10 Common Health Issues: ...`, so I can always tell where an answer came from. That label is part of the 1,000 characters, so the code subtracts its length from the budget before packing. Without that, a full chunk plus a long source name came out over 1,000.
 
-**Estimated chunk count:** about 70–100 total.
+**Why I changed the chunk size (Milestone 4):**
+
+I picked 1,000 characters because that's about the size of one section in my documents. When I actually tested retrieval, that turned out to be wrong, and the reason is something I hadn't understood: **an embedding is an average over everything in the chunk.** A whole section contains one sentence that answers the question plus a lot of surrounding material, and the surrounding material pulls the vector away from the answer.
+
+I measured it on my crating question. The sentence "Crating is not cruel as dogs are den animals" scores **0.694** similarity against "Is crating cruel?" on its own. Inside its 898-character section chunk, the same sentence scored **0.072**. Adding just one neutral sentence about crates being a useful training tool dropped it from 0.598 to 0.340.
+
+So I tested my 5 questions at several chunk sizes and counted how many retrieved their answer in the top 5:
+
+| Chunk size | Chunks | Questions answered in top 5 |
+|---|---|---|
+| 200 | 293 | 5/5 |
+| 450 | 162 | 5/5 |
+| 600 | 118 | 4/5 |
+| 1,000 | 76 | 4/5 |
+
+I went with 200. It answers all 5 questions and gives the lowest distance scores. The cost is that a chunk is now one or two sentences instead of a whole section, so each one carries less context — I'll need a slightly larger top-k to give the model enough to work with.
+
+**Two other things I changed after testing:**
+
+1. **I stopped embedding the source name.** I was putting "Mid-Atlantic Iggy Rescue - Housetraining: " on the front of every chunk *before* embedding it, so every single vector contained a rescue group's name and the words "Italian Greyhound". That shared wording drowned out the words that actually tell chunks apart — searching "crate training" found the right chunk at rank 1, but "Is crating an Italian Greyhound cruel?" couldn't find it in the top 5 at all. The source name is still stored in the metadata and still shown with the answer, so attribution works exactly the same.
+
+2. **I treat the breed name as a stopword.** Every document I have is about Italian Greyhounds, so the phrase appears everywhere and tells you nothing about which chunk you want. Removing it from both the chunks and the query moved my weight question from rank 20 to rank 2.
+
+**Chunk count:** 293 across 10 documents (I originally estimated 70–100, but that was at the larger chunk size).
 
 ---
 

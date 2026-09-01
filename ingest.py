@@ -21,8 +21,14 @@ from pathlib import Path
 
 DOCS_DIR = Path("documents")
 
-CHUNK_SIZE = 1000     # characters
-OVERLAP = 150         # characters
+# I started at 1,000 characters because that's about the size of one section
+# in my documents. Testing retrieval showed that was too big: a section holds
+# one useful sentence plus a lot of other material, and the embedding
+# averages over all of it, so the useful sentence gets washed out. Measuring
+# my 5 test questions at several sizes, 450 was the best -- see the Chunking
+# Strategy section of planning.md.
+CHUNK_SIZE = 200      # characters
+OVERLAP = 30          # characters (about 15%)
 
 # Lines containing any of these are site furniture, never article text.
 # This catches cookie banners and footers, which are full sentences and so
@@ -34,6 +40,9 @@ JUNK_PHRASES = [
     "advertisement", "skip to content", "back to top", "click here",
     "add to cart", "related questions", "you may also like",
     "comment", "reply", "posted by", "leave a", "sign in",
+    # One of my sources is a shop, so its pages carry promo banners.
+    "free shipping", "shipping over", "tariff", "duties included",
+    "something went wrong", "% off", "checkout", "in stock", "sold out",
 ]
 
 # Whole lines that are always buttons or placeholders. These are matched
@@ -121,6 +130,13 @@ def is_real_content(line):
     if any(phrase in lowered for phrase in JUNK_PHRASES):
         return False
 
+    # Phone numbers and other bare numbers. The vet page lists its clinic
+    # numbers right above the article, and they were ending up at the top of
+    # my first chunk.
+    digits = sum(c.isdigit() for c in line)
+    if digits and digits >= len(line.replace(" ", "")) * 0.6:
+        return False
+
     if re.search(r"[.!?]", line):
         return True
 
@@ -195,8 +211,22 @@ def drop_fragments_and_repeats(lines):
             continue
 
         # A real sentence or heading starts with a capital letter, a digit,
-        # or a quote mark.
-        if not re.match(r'["\'(\w]', line) or line[0].islower():
+        # or a quote mark. Anything else is a piece of a sentence.
+        is_fragment = not re.match(r'["\'(\w]', line) or line[0].islower()
+
+        if is_fragment:
+            # If the line above it is also unfinished, these two are halves
+            # of one sentence that the page split apart -- usually because a
+            # word in the middle was bold or a link. Join them back together.
+            #
+            # This matters. The housetraining page says "Crating is **not**
+            # cruel as dogs are den animals", and the bold "not" broke it
+            # into three pieces. I used to delete the lowercase piece, which
+            # quietly threw away the answer to one of my test questions.
+            if kept and kept[-1] and not re.search(r"[.!?:]$", kept[-1]):
+                kept[-1] = kept[-1] + " " + line
+            # Otherwise the sentence above it is complete, so this really is
+            # leftover junk (", Kinship Partners, Inc.") and it goes.
             continue
 
         if line.lower() in seen:
@@ -250,6 +280,11 @@ def clean_text(text):
 # Step 3: chunk
 # ---------------------------------------------------------------------------
 
+def is_heading(piece):
+    """A heading is a short line with no sentence punctuation in it."""
+    return len(piece) <= 100 and not re.search(r"[.!?]", piece)
+
+
 def split_into_sentences(paragraph):
     """Break a paragraph after . ! or ? followed by a space."""
     parts = re.split(r"(?<=[.!?])\s+", paragraph)
@@ -262,11 +297,9 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
     Recursive means: try paragraphs first. If a paragraph is too big on its
     own, break it into sentences. Only cut mid-sentence as a last resort.
     """
-    # The source name gets stuck on the front of every chunk at the end, so
-    # leave room for it now. Otherwise a full chunk plus a long source name
-    # comes out over the limit.
+    # The source name goes on the front for display, but it isn't part of
+    # what gets embedded any more, so it doesn't eat into the chunk budget.
     label = f"{source}: "
-    chunk_size = chunk_size - len(label)
 
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
@@ -279,19 +312,36 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
 
         # Too long, so go down a level to sentences.
         for sentence in split_into_sentences(paragraph):
-            if len(sentence) <= chunk_size:
-                pieces.append(sentence)
-            else:
-                # Last resort: one really long sentence, cut it.
-                for i in range(0, len(sentence), chunk_size):
-                    pieces.append(sentence[i:i + chunk_size])
+            # A sentence longer than the limit is kept whole and allowed to
+            # go over, rather than sliced in the middle. Slicing produced
+            # chunks that trailed off like "...because of their slim", which
+            # are useless on their own. A slightly oversized chunk is a much
+            # smaller problem than a broken one.
+            pieces.append(sentence)
 
     # Now pack the pieces into chunks, filling each one up to chunk_size.
     chunks = []
     current = ""
 
     for piece in pieces:
-        if not current:
+        # Start a new chunk at every heading, instead of packing the next
+        # section on to the end of the last one.
+        #
+        # This is the fix for my worst retrieval failure. The sentence
+        # "Crating is not cruel as dogs are den animals" scores 0.668
+        # against the question "is crating cruel?" on its own -- but it was
+        # sitting in a 911-character chunk with seven other sentences about
+        # crate sizes and bathroom breaks, and the chunk as a whole only
+        # scored 0.312. An embedding averages over everything in the chunk,
+        # so one useful sentence in a pile of unrelated ones gets washed
+        # out. Keeping a chunk to one section keeps it about one thing.
+        if is_heading(piece) and current:
+            current, _ = move_trailing_headings(current)
+            if current.strip():
+                chunks.append(current)
+            current = piece
+
+        elif not current:
             current = piece
         elif len(current) + 2 + len(piece) <= chunk_size:
             current += "\n\n" + piece
@@ -331,8 +381,16 @@ def chunk_text(text, source, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
         chunks.pop()
 
     # Attach the source name to each chunk and drop any empties.
+    # "text" has the source name on the front, which is what I show to a
+    # reader and hand to the LLM. "body" is the same chunk without it.
+    #
+    # I embed the body, not the text. Putting the source name on every chunk
+    # meant every embedding contained "Italian Greyhound" and a rescue
+    # group's name, and that shared wording drowned out the words that
+    # actually tell chunks apart. Attribution still works because the source
+    # is stored in the metadata.
     return [
-        {"source": source, "text": f"{label}{c.strip()}"}
+        {"source": source, "text": f"{label}{c.strip()}", "body": c.strip()}
         for c in chunks
         if c.strip()
     ]

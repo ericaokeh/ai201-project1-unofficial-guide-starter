@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./venv/bin/python ingest.py)",
+      "Bash(./venv/bin/python -c \"import embed\")",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
