@@ -12,6 +12,8 @@ than evidence.
 
 Run it with:  python generate.py            (asks questions in a loop)
               python generate.py "question" (answers one question)
+
+For the web interface, run app.py instead.
 """
 
 import os
@@ -169,9 +171,6 @@ def check_citations(text, hits):
     was only given 6 sources, or writing an answer with no citations at all
     and hoping I don't notice. So I check rather than trust.
     """
-    # Match [1] but also 【1】 and (1). The model sometimes uses full-width
-    # brackets, and my first version only looked for square ones -- so a
-    # correctly cited answer got flagged as having no citations at all.
     # Match [1] but also 【1】, (1), [1, 5] and 【1†L1-L2】. The model varies
     # its citation style a lot, and my first version only looked for plain
     # square brackets -- so a properly cited answer got flagged as having no
@@ -240,74 +239,6 @@ def ask(question):
     print(format_answer(text, hits))
 
 
-def launch_ui():
-    """A web page with a question box, an answer, and a source list.
-
-    Gradio is imported in here rather than at the top of the file so the
-    command line version still works if it isn't installed.
-    """
-    import gradio as gr
-
-    def respond(question):
-        if not question.strip():
-            return "Ask me something about Italian Greyhounds.", ""
-
-        text, hits = answer(question)
-
-        # The source table is built from the retrieved chunks, not from
-        # anything the model wrote, so it can't be faked or forgotten.
-        if not hits:
-            return text, "_No sources — nothing in my documents matched._"
-
-        check = check_citations(text, hits)
-        rows = ["| | Source | File | Chunk | Distance |",
-                "|---|---|---|---|---|"]
-        for n, hit in enumerate(hits, start=1):
-            used = "cited" if n in check["cited"] else ""
-            rows.append(f"| [{n}] {used} | {hit['source']} | `{hit['filename']}` | "
-                        f"{hit['position']} | {hit['distance']} |")
-
-        if check["invented"]:
-            rows.append(f"\n**Warning:** the answer cites {check['invented']}, "
-                        f"which don't exist.")
-        if check["uncited"]:
-            rows.append("\n**Warning:** the answer has no citations.")
-
-        return text, "\n".join(rows)
-
-    with gr.Blocks(title="The Unofficial Italian Greyhound Guide") as page:
-        gr.Markdown(
-            "# The Unofficial Italian Greyhound Guide\n"
-            "Answers come only from 10 saved rescue, vet, and owner pages. "
-            "If they don't cover something, it says so instead of guessing."
-        )
-
-        question = gr.Textbox(
-            label="Your question",
-            placeholder="e.g. how do I stop my iggy getting cold at night?",
-        )
-        ask_button = gr.Button("Ask", variant="primary")
-
-        answer_box = gr.Markdown(label="Answer")
-        sources_box = gr.Markdown(label="Sources")
-
-        gr.Examples(
-            examples=[
-                "Do Italian Greyhounds bark a lot?",
-                "How can I tell if my sighthound is cold?",
-                "Is crating cruel?",
-                "Do they get along with cats?",
-                "Which breeder should I buy a puppy from?",
-            ],
-            inputs=question,
-        )
-
-        for trigger in (ask_button.click, question.submit):
-            trigger(respond, inputs=question, outputs=[answer_box, sources_box])
-
-    page.launch()
-
-
 def repl():
     """Ask questions until I type quit."""
     print("Italian Greyhound guide. Ask a question, or 'quit' to stop.")
@@ -338,8 +269,6 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1 and sys.argv[1] == "--models":
         list_models()
-    elif len(sys.argv) > 1 and sys.argv[1] == "--ui":
-        launch_ui()
     elif len(sys.argv) > 1:
         ask(" ".join(sys.argv[1:]))
     else:

@@ -4,7 +4,9 @@
       "Bash(./venv/bin/python ingest.py)",
       "Bash(./venv/bin/python -c \"import embed\")",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(kill 16299)",
+      "Bash(lsof -ti:7860)"
     ]
   }
 }
