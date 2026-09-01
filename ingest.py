@@ -43,6 +43,7 @@ JUNK_PHRASES = [
     # One of my sources is a shop, so its pages carry promo banners.
     "free shipping", "shipping over", "tariff", "duties included",
     "something went wrong", "% off", "checkout", "in stock", "sold out",
+    "use your data", "opt out", "your preferences",
 ]
 
 # Whole lines that are always buttons or placeholders. These are matched
@@ -215,6 +216,12 @@ def drop_fragments_and_repeats(lines):
         is_fragment = not re.match(r'["\'(\w]', line) or line[0].islower()
 
         if is_fragment:
+            # A piece starting with punctuation (", Kinship Partners, Inc.")
+            # is leftover footer text, not the rest of a sentence. Only a
+            # piece starting with a lowercase letter is a real continuation.
+            if not line[0].islower():
+                continue
+
             # If the line above it is also unfinished, these two are halves
             # of one sentence that the page split apart -- usually because a
             # word in the middle was bold or a link. Join them back together.
